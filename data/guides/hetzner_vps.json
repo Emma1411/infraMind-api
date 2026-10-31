@@ -1,0 +1,462 @@
+{
+  "arch_id": "hetzner_vps",
+  "title": "Déployer ton application sur un serveur Hetzner",
+  "intro": "Ce guide te mène de zéro à ton application en ligne sur un serveur Hetzner [[server_type]], avec sauvegardes. Suis les étapes dans l'ordre : chacune explique à quoi elle sert et comment vérifier qu'elle a fonctionné.",
+  "prerequisites": [
+    "Une application qui démarre avec Docker Compose (un fichier docker-compose.yml) et dont le code est dans un dépôt Git.",
+    "Un terminal sur ton ordinateur (PowerShell sous Windows, Terminal sous macOS ou Linux) avec la commande ssh.",
+    "Un moyen de paiement pour ton compte Hetzner.",
+    "Un nom de domaine (facultatif, nécessaire pour avoir HTTPS)."
+  ],
+  "steps": [
+    {
+      "id": "compte",
+      "title": "Créer ton compte Hetzner et un projet",
+      "where": "console",
+      "why": "Le projet regroupe tes serveurs et ta facturation : tout ce que tu crées ensuite s'y trouve.",
+      "checklist": [
+        "Crée un compte sur hetzner.com et connecte-toi à la console Cloud.",
+        "Crée un projet, par exemple « [[app_slug]] ».",
+        "Ajoute un moyen de paiement si la console te le demande."
+      ],
+      "commands": [],
+      "expect": "Tu vois la console Hetzner Cloud avec un projet vide, sans aucun serveur.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Hetzner peut demander une vérification d'identité avant d'activer un nouveau compte : suis ses instructions et attends sa confirmation.",
+        "doc_url": "https://docs.hetzner.com/cloud/servers/getting-started/creating-a-server",
+        "doc_label": "Documentation Hetzner : créer un serveur",
+        "search_query": "Hetzner Cloud créer un compte et un projet"
+      }
+    },
+    {
+      "id": "cle-ssh",
+      "title": "Créer ta clé SSH (avant de créer le serveur)",
+      "where": "local",
+      "why": "Une clé SSH est ta clé d'accès au serveur, bien plus sûre qu'un mot de passe. Il faut la créer maintenant, car la console ne permet pas de l'ajouter à un serveur existant.",
+      "checklist": [],
+      "commands": [
+        {
+          "label": "Créer la clé (appuie sur Entrée à chaque question pour garder les valeurs par défaut)",
+          "language": "bash",
+          "code": "ssh-keygen -t ed25519 -C \"[[app_slug]]\""
+        },
+        {
+          "label": "Afficher ta clé publique (Windows PowerShell)",
+          "language": "powershell",
+          "os": "windows",
+          "code": "Get-Content $env:USERPROFILE\\.ssh\\id_ed25519.pub"
+        },
+        {
+          "label": "Afficher ta clé publique (macOS ou Linux)",
+          "language": "bash",
+          "os": "macos_linux",
+          "code": "cat ~/.ssh/id_ed25519.pub"
+        }
+      ],
+      "expect": "Une ligne qui commence par ssh-ed25519 s'affiche. Copie-la en entier : tu la colleras dans la console à l'étape suivante.",
+      "warning": "Ne partage jamais le fichier id_ed25519 (sans .pub) : c'est ta clé privée. Seule la clé publique (.pub) se donne.",
+      "optional": false,
+      "help": {
+        "common_cause": "La commande ssh-keygen n'est pas reconnue : ton système n'a pas le client OpenSSH. Cherche comment l'installer pour ton système, puis rouvre le terminal.",
+        "doc_url": "https://docs.hetzner.com/cloud/servers/getting-started/creating-a-server",
+        "doc_label": "Documentation Hetzner : créer un serveur",
+        "search_query": "créer une clé SSH ed25519 ssh-keygen tutoriel"
+      }
+    },
+    {
+      "id": "serveur",
+      "title": "Créer le serveur dans la console Hetzner",
+      "where": "console",
+      "why": "C'est la machine qui fera tourner ton application. L'image Docker CE préinstalle Docker, donc tu n'as rien à installer toi-même.",
+      "checklist": [
+        "Dans ton projet, clique sur Add Server (Ajouter un serveur).",
+        "Emplacement : [[location]] (le plus proche du Québec parmi les emplacements américains).",
+        "Image : onglet Apps, choisis Docker CE.",
+        "Type : [[server_type]] ([[vcpu]] vCPU, [[ram_gb]] Go de RAM, [[disk_gb]] Go de disque). S'il n'est pas proposé, choisis le plan le plus proche.",
+        "Réseau : garde l'adresse IPv4 publique activée (environ [[ipv4_cost]] $ US par mois en plus).",
+        "Clé SSH : clique sur Add SSH key et colle ta clé publique de l'étape précédente.",
+        "Sauvegardes : coche l'option Backups (environ [[backup_cost]] $ US par mois en plus).",
+        "Nom : [[app_slug]]. Puis clique sur Create & Buy now."
+      ],
+      "commands": [],
+      "expect": "Le serveur apparaît dans la liste avec une adresse IP. Note-la : dans les étapes suivantes, elle s'appelle VOTRE_IP_SERVEUR.",
+      "warning": "Compare le prix affiché par la console avec l'estimation de référence ([[monthly_total]] $ US par mois, hors taxes) avant de confirmer. Les prix des fournisseurs changent.",
+      "optional": false,
+      "help": {
+        "common_cause": "Le plan voulu n'apparaît pas pour cet emplacement : choisis un plan de taille proche ou un autre emplacement.",
+        "doc_url": "https://docs.hetzner.com/cloud/servers/getting-started/creating-a-server",
+        "doc_label": "Documentation Hetzner : créer un serveur",
+        "search_query": "Hetzner Cloud créer un serveur Ubuntu Docker tutoriel"
+      }
+    },
+    {
+      "id": "pare-feu",
+      "title": "Créer un pare-feu",
+      "where": "console",
+      "why": "Le pare-feu bloque tout ce que tu n'autorises pas, avant que le trafic n'atteigne ton serveur. Il est gratuit.",
+      "checklist": [
+        "Dans la console : Firewalls, puis Create Firewall.",
+        "Règles entrantes (Inbound) : TCP port 22 (SSH), TCP port 80 (HTTP) et TCP port 443 (HTTPS), depuis toutes les adresses.",
+        "Dans Apply to, choisis ton serveur.",
+        "Clique sur Create Firewall."
+      ],
+      "commands": [],
+      "expect": "Le pare-feu apparaît dans la liste, attaché à ton serveur.",
+      "warning": "N'oublie pas le port 22 : sans lui, tu ne pourras plus te connecter en SSH. Si ça arrive, la console VNC de Hetzner permet de reprendre la main.",
+      "optional": false,
+      "help": {
+        "common_cause": "Le pare-feu n'est pas attaché au serveur : vérifie la section Apply to du pare-feu.",
+        "doc_url": "https://docs.hetzner.com/cloud/firewalls/getting-started/creating-a-firewall",
+        "doc_label": "Documentation Hetzner : créer un pare-feu",
+        "search_query": "Hetzner Cloud firewall ouvrir ports 22 80 443"
+      }
+    },
+    {
+      "id": "connexion",
+      "title": "Te connecter au serveur",
+      "where": "local",
+      "why": "À partir de maintenant, tu pilotes le serveur depuis ton terminal, comme si tu étais devant lui.",
+      "checklist": [],
+      "commands": [
+        {
+          "label": "Connexion SSH (remplace VOTRE_IP_SERVEUR)",
+          "language": "bash",
+          "code": "ssh root@VOTRE_IP_SERVEUR"
+        }
+      ],
+      "expect": "Au premier essai, le terminal demande de confirmer l'empreinte du serveur : écris yes. Tu vois ensuite une invite qui commence par root@.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Connection refused ou timeout : le pare-feu bloque le port 22, ou le serveur démarre encore (attends une minute et réessaie).",
+        "doc_url": "https://docs.hetzner.com/cloud/servers/getting-started/connecting-to-the-server",
+        "doc_label": "Documentation Hetzner : se connecter au serveur",
+        "search_query": "ssh root serveur connection refused Hetzner"
+      }
+    },
+    {
+      "id": "utilisateur",
+      "title": "Mettre à jour le serveur et créer un utilisateur de déploiement",
+      "where": "server",
+      "why": "Travailler en administrateur (root) est risqué : une erreur peut tout casser. Un utilisateur dédié limite les dégâts.",
+      "checklist": [
+        "Pendant adduser, choisis un mot de passe solide. Les autres champs peuvent rester vides (appuie sur Entrée)."
+      ],
+      "commands": [
+        {
+          "label": "Mettre le système à jour",
+          "language": "bash",
+          "code": "apt update && apt upgrade -y"
+        },
+        {
+          "label": "Créer l'utilisateur deploy et lui donner ta clé",
+          "language": "bash",
+          "code": "adduser deploy\nusermod -aG sudo,docker deploy\nmkdir -p /home/deploy/.ssh\ncp ~/.ssh/authorized_keys /home/deploy/.ssh/\nchown -R deploy:deploy /home/deploy/.ssh\nchmod 700 /home/deploy/.ssh\nchmod 600 /home/deploy/.ssh/authorized_keys"
+        },
+        {
+          "label": "Tester dans un deuxième terminal, sur ton ordinateur",
+          "language": "bash",
+          "code": "ssh deploy@VOTRE_IP_SERVEUR"
+        }
+      ],
+      "expect": "Dans le deuxième terminal, tu te connectes sans erreur et l'invite commence par deploy@. Dans la suite du guide, tu travailles avec cet utilisateur.",
+      "warning": "Ne ferme pas la première connexion avant que le test avec deploy ait fonctionné.",
+      "optional": false,
+      "help": {
+        "common_cause": "Permission denied : la clé n'a pas été copiée correctement. Refais les commandes cp et chmod depuis la première connexion.",
+        "doc_url": "https://docs.hetzner.com/cloud/servers/getting-started/connecting-to-the-server",
+        "doc_label": "Documentation Hetzner : se connecter au serveur",
+        "search_query": "ubuntu créer un utilisateur sudo connexion ssh avec clé"
+      }
+    },
+    {
+      "id": "code",
+      "title": "Récupérer ton application sur le serveur",
+      "where": "server",
+      "why": "Ton code arrive sur le serveur depuis ton dépôt Git.",
+      "checklist": [],
+      "commands": [
+        {
+          "label": "Cloner le dépôt (remplace l'adresse par la tienne)",
+          "language": "bash",
+          "code": "git clone https://github.com/VOTRE_COMPTE/VOTRE_DEPOT.git\ncd VOTRE_DEPOT\nls"
+        }
+      ],
+      "expect": "La commande ls affiche les fichiers de ton projet, dont docker-compose.yml.",
+      "warning": "Si ton dépôt est privé, GitHub n'accepte pas ton mot de passe : utilise un jeton d'accès personnel ou une clé de déploiement (cherche la documentation de GitHub).",
+      "optional": false,
+      "help": {
+        "common_cause": "Repository not found : l'adresse est incorrecte, ou le dépôt est privé et le serveur n'a pas les droits.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "git clone dépôt privé GitHub jeton d'accès personnel"
+      }
+    },
+    {
+      "id": "secrets",
+      "title": "Configurer les mots de passe et les clés de ton application",
+      "where": "server",
+      "why": "Tes secrets (mot de passe de la base, clés d'API) restent dans un fichier .env sur le serveur : ils ne doivent jamais se retrouver dans ton dépôt Git.",
+      "checklist": [
+        "Remplace chaque valeur d'exemple par une vraie valeur.",
+        "Pour le mot de passe de la base, génère-en un long et unique avec la deuxième commande ci-dessous, puis colle le résultat.",
+        "Enregistre avec Ctrl+O puis Entrée, et quitte avec Ctrl+X."
+      ],
+      "commands": [
+        {
+          "label": "Créer le fichier de configuration à partir de l'exemple",
+          "language": "bash",
+          "code": "cp .env.example .env"
+        },
+        {
+          "label": "Générer un mot de passe solide",
+          "language": "bash",
+          "code": "openssl rand -base64 32"
+        },
+        {
+          "label": "Modifier le fichier",
+          "language": "bash",
+          "code": "nano .env"
+        }
+      ],
+      "expect": "Le fichier .env contient tes vraies valeurs, sans aucune valeur d'exemple.",
+      "warning": "Ne mets jamais le fichier .env dans ton dépôt Git : il doit figurer dans ton .gitignore.",
+      "optional": false,
+      "help": {
+        "common_cause": "cp : fichier introuvable. Ton projet n'a pas de .env.example : crée un fichier .env à la main avec les variables dont ton application a besoin.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "docker compose fichier .env variables d'environnement"
+      }
+    },
+    {
+      "id": "demarrage",
+      "title": "Démarrer l'application",
+      "where": "server",
+      "why": "Docker Compose construit et lance tous les services de ton application d'un seul coup.",
+      "checklist": [
+        "Dans ton docker-compose.yml, publie le port de ton application sur le port 80 (par exemple 80:8000 si elle écoute sur le port 8000)."
+      ],
+      "commands": [
+        {
+          "label": "Construire et démarrer en arrière-plan",
+          "language": "bash",
+          "code": "docker compose up -d --build"
+        },
+        {
+          "label": "Vérifier l'état des services",
+          "language": "bash",
+          "code": "docker compose ps"
+        },
+        {
+          "label": "Lire les derniers messages de l'application",
+          "language": "bash",
+          "code": "docker compose logs --tail 50"
+        }
+      ],
+      "expect": "Tous les services sont à l'état running (ou Up) et les messages ne montrent aucune erreur.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "permission denied en lançant docker : déconnecte-toi (exit) puis reconnecte-toi en SSH, pour que ton utilisateur reçoive le groupe docker.",
+        "doc_url": "https://docs.hetzner.com/cloud/apps/list/docker-ce/",
+        "doc_label": "Documentation Hetzner : application Docker CE",
+        "search_query": "docker compose up erreur démarrage conteneur"
+      }
+    },
+    {
+      "id": "verification",
+      "title": "Vérifier que l'application répond",
+      "where": "local",
+      "why": "Il faut tester depuis l'extérieur, comme le ferait un utilisateur.",
+      "checklist": [
+        "Ouvre http://VOTRE_IP_SERVEUR dans ton navigateur.",
+        "Teste une action complète de ton application (connexion, création d'un élément)."
+      ],
+      "commands": [],
+      "expect": "Ton application s'affiche et les données sont bien enregistrées par la base.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "La page ne se charge pas : vérifie que le port 80 est ouvert dans le pare-feu, que le port est bien publié dans docker-compose.yml, et lis les messages de l'étape précédente.",
+        "doc_url": "https://docs.hetzner.com/cloud/firewalls/getting-started/creating-a-firewall",
+        "doc_label": "Documentation Hetzner : pare-feu",
+        "search_query": "docker compose application inaccessible port 80"
+      }
+    },
+    {
+      "id": "https",
+      "title": "Ajouter un nom de domaine et HTTPS",
+      "where": "server",
+      "why": "HTTPS chiffre les échanges. Il est indispensable si ton application gère des comptes ou des données personnelles. Caddy obtient et renouvelle le certificat tout seul.",
+      "checklist": [
+        "Chez ton registraire de domaine, crée un enregistrement DNS de type A qui pointe VOTRE_DOMAINE vers VOTRE_IP_SERVEUR.",
+        "Dans docker-compose.yml, supprime la ligne qui publie ton application sur le port 80 et ajoute le service caddy ci-dessous.",
+        "Crée le fichier Caddyfile à côté de docker-compose.yml, avec le nom de ton service et son port à la place de NOM_DU_SERVICE et PORT."
+      ],
+      "commands": [
+        {
+          "label": "À ajouter dans la section services de docker-compose.yml",
+          "language": "yaml",
+          "code": "  caddy:\n    image: caddy:2\n    restart: unless-stopped\n    ports:\n      - \"80:80\"\n      - \"443:443\"\n    volumes:\n      - ./Caddyfile:/etc/caddy/Caddyfile\n      - caddy_data:/data\n      - caddy_config:/config"
+        },
+        {
+          "label": "À ajouter dans la section volumes de docker-compose.yml",
+          "language": "yaml",
+          "code": "volumes:\n  caddy_data:\n  caddy_config:"
+        },
+        {
+          "label": "Contenu du fichier Caddyfile",
+          "language": "text",
+          "code": "VOTRE_DOMAINE {\n    reverse_proxy NOM_DU_SERVICE:PORT\n}"
+        },
+        {
+          "label": "Redémarrer",
+          "language": "bash",
+          "code": "docker compose up -d"
+        }
+      ],
+      "expect": "https://VOTRE_DOMAINE affiche ton application avec un cadenas.",
+      "warning": "Si ton fichier docker-compose.yml a déjà une section volumes, ajoute seulement les deux lignes caddy_data et caddy_config dedans. Respecte l'indentation.",
+      "optional": true,
+      "help": {
+        "common_cause": "Le certificat n'est pas émis : l'enregistrement DNS n'est pas encore propagé (attends un peu et réessaie), ou les ports 80 et 443 sont fermés dans le pare-feu.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "Caddy reverse proxy docker compose HTTPS automatique"
+      }
+    },
+    {
+      "id": "sauvegardes",
+      "title": "Vérifier les sauvegardes",
+      "where": "console",
+      "why": "Si le serveur plante ou si tu fais une erreur, c'est ta seule façon de revenir en arrière.",
+      "checklist": [
+        "Dans la console : ton serveur, puis l'onglet Backups.",
+        "Vérifie que les sauvegardes sont activées. Hetzner garde des copies quotidiennes dans sept emplacements qui tournent.",
+        "Avant d'en avoir besoin, teste une restauration sur un serveur de test, puis supprime-le."
+      ],
+      "commands": [],
+      "expect": "L'onglet Backups indique que les sauvegardes sont actives.",
+      "warning": "Les sauvegardes sont quotidiennes : après une panne, tu peux perdre jusqu'à une journée de données. Elles ne remplacent pas une exportation de ta base de données.",
+      "optional": false,
+      "help": {
+        "common_cause": "L'onglet Backups propose de les activer : tu as oublié de cocher l'option à la création. Tu peux l'activer maintenant.",
+        "doc_url": "https://docs.hetzner.com/cloud/servers/getting-started/enabling-backups",
+        "doc_label": "Documentation Hetzner : activer les sauvegardes",
+        "search_query": "Hetzner Cloud sauvegardes activer restaurer"
+      }
+    },
+    {
+      "id": "couts",
+      "title": "Surveiller tes coûts",
+      "where": "console",
+      "why": "Un serveur coûte tant qu'il existe, même si personne ne l'utilise. Il vaut mieux savoir à quoi s'attendre.",
+      "checklist": [
+        "Estimation de référence : [[monthly_total]] $ US par mois (serveur, sauvegardes et IPv4), hors taxes. Les prix changent d'un fournisseur et d'une région à l'autre.",
+        "Ton plan [[server_type]] inclut [[included_traffic]] de trafic sortant par mois. Au-delà, compte environ [[extra_traffic]] $ US par To.",
+        "Regarde dans la console si une alerte de dépense existe ; sinon, mets un rappel mensuel dans ton calendrier pour vérifier ta facture."
+      ],
+      "commands": [],
+      "expect": "Tu sais combien tu paies par mois et quand tu le vérifies.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Une facture plus élevée que prévu vient presque toujours du trafic sortant ou de ressources oubliées (adresses IP, volumes, copies).",
+        "doc_url": "https://docs.hetzner.com/cloud/servers/primary-ips/overview",
+        "doc_label": "Documentation Hetzner : adresses IP principales",
+        "search_query": "Hetzner Cloud facturation trafic dépassement"
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "id": "suppr-donnees",
+      "title": "Récupérer tes données (si tu utilises PostgreSQL)",
+      "where": "server",
+      "why": "Quand le serveur sera supprimé, tout ce qu'il contient disparaîtra. Exporte ce que tu veux garder avant.",
+      "checklist": [],
+      "commands": [
+        {
+          "label": "Sur le serveur : exporter la base (adapte les noms à ton docker-compose.yml)",
+          "language": "bash",
+          "code": "docker compose exec -T VOTRE_SERVICE_BASE pg_dump -U VOTRE_UTILISATEUR VOTRE_BASE > sauvegarde.sql"
+        },
+        {
+          "label": "Sur ton ordinateur : télécharger le fichier",
+          "language": "bash",
+          "code": "scp deploy@VOTRE_IP_SERVEUR:~/VOTRE_DEPOT/sauvegarde.sql ."
+        }
+      ],
+      "expect": "Un fichier sauvegarde.sql non vide est présent sur ton ordinateur.",
+      "warning": null,
+      "optional": true,
+      "help": {
+        "common_cause": "pg_dump introuvable ou erreur d'accès : le nom du service, de l'utilisateur ou de la base ne correspond pas à ton docker-compose.yml.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "docker compose pg_dump exporter base PostgreSQL"
+      }
+    },
+    {
+      "id": "suppr-serveur",
+      "title": "Supprimer le serveur",
+      "where": "console",
+      "why": "Tant que le serveur existe, il est facturé.",
+      "checklist": [
+        "Dans la console : Servers, ton serveur, puis Delete (Supprimer)."
+      ],
+      "commands": [],
+      "expect": "Le serveur disparaît de la liste.",
+      "warning": "Cette action est définitive : les données du serveur sont perdues.",
+      "optional": false,
+      "help": {
+        "common_cause": "Le bouton de suppression est désactivé : une protection contre la suppression est activée sur le serveur. Désactive-la dans ses paramètres.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "Hetzner Cloud supprimer un serveur"
+      }
+    },
+    {
+      "id": "suppr-reste",
+      "title": "Vérifier qu'il ne reste rien de facturé",
+      "where": "console",
+      "why": "Certaines ressources existent séparément du serveur et continuent d'être facturées.",
+      "checklist": [
+        "Servers : la liste est vide.",
+        "Primary IPs : supprime toute adresse IP restante, elle est facturée séparément.",
+        "Volumes, Snapshots et Backups : supprime ceux dont tu n'as plus besoin.",
+        "Firewalls : ils sont gratuits, tu peux les garder ou les supprimer."
+      ],
+      "commands": [],
+      "expect": "Aucune ressource facturable ne reste dans ton projet.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Une adresse IP reste facturée : elle n'est pas supprimée automatiquement dans tous les cas, vérifie la liste Primary IPs.",
+        "doc_url": "https://docs.hetzner.com/cloud/servers/primary-ips/overview",
+        "doc_label": "Documentation Hetzner : adresses IP principales",
+        "search_query": "Hetzner Cloud supprimer adresse IP facturation"
+      }
+    }
+  ],
+  "limits": [
+    "Ce guide met tout sur un seul serveur : une panne du serveur arrête l'application, et les sauvegardes sont quotidiennes.",
+    "Le renforcement avancé de la sécurité (désactivation de la connexion root, détection d'intrusion, mises à jour automatiques) n'est pas couvert.",
+    "Il suppose une application qui démarre avec Docker Compose.",
+    "Les prix sont des références pour les États-Unis (octobre 2026) et changent d'une région à l'autre.",
+    "Les étapes de la console dépendent de l'interface de Hetzner, qui peut évoluer."
+  ],
+  "sources": [
+    {"label": "Hetzner : créer un serveur", "url": "https://docs.hetzner.com/cloud/servers/getting-started/creating-a-server"},
+    {"label": "Hetzner : se connecter au serveur", "url": "https://docs.hetzner.com/cloud/servers/getting-started/connecting-to-the-server"},
+    {"label": "Hetzner : créer un pare-feu", "url": "https://docs.hetzner.com/cloud/firewalls/getting-started/creating-a-firewall"},
+    {"label": "Hetzner : activer les sauvegardes", "url": "https://docs.hetzner.com/cloud/servers/getting-started/enabling-backups"},
+    {"label": "Hetzner : adresses IP principales", "url": "https://docs.hetzner.com/cloud/servers/primary-ips/overview"},
+    {"label": "Hetzner : application Docker CE", "url": "https://docs.hetzner.com/cloud/apps/list/docker-ce/"}
+  ],
+  "written_from_docs_on": "2026-10-31",
+  "tested_on": null
+}

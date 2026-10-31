@@ -156,6 +156,7 @@ class TeamSpec(_Section):
     who_maintains: Maintainer | None = None
     contract_duration_months: int | None = Field(default=None, ge=0)
     ops_skill: OpsSkill | None = None
+    hourly_rate: float | None = Field(default=None, ge=0)
 
 
 class ConstraintsSpec(_Section):

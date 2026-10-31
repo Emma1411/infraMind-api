@@ -20,6 +20,8 @@ from services.engine.catalog import PRICING_DISCLAIMER, Catalog, get_catalog
 from services.engine.costing import BUILDERS
 from services.engine.fx import FxTable, get_fx
 from services.engine.scoring import compute_weights, cost_score
+from services.engine.sensitivity import compute_sensitivity
+from services.engine.graphs import build_graph
 
 _PROVIDER_ALIASES = {
     "hetzner": "hetzner",
@@ -46,6 +48,21 @@ def _budget_in_usd(spec: ProjectSpec, fx: FxTable) -> tuple[float | None, str | 
             "Renseigne-le dans data/fx.json."
         )
     return amount / rate, None
+
+
+def _hourly_rate_usd(spec: ProjectSpec, fx: FxTable) -> tuple[float | None, str | None]:
+    """Tarif horaire converti en USD. Exprimé dans la devise du budget, ou en USD si elle est absente."""
+    rate = spec.team.hourly_rate
+    if rate is None:
+        return None, None
+    currency = spec.constraints.budget_currency.value if spec.constraints.budget_currency else "USD"
+    per_usd = fx.rate(currency)
+    if per_usd is None:
+        return None, (
+            f"Taux de change {currency}/USD non renseigné : le tarif horaire est ignoré. "
+            "Renseigne-le dans data/fx.json."
+        )
+    return rate / per_usd, None
 
 
 def _budget_status(
@@ -146,7 +163,12 @@ def _global_warnings(spec: ProjectSpec, tier: str, extra: list[str | None]) -> l
     return warnings
 
 
-def evaluate(spec: ProjectSpec, catalog: Catalog | None = None, fx: FxTable | None = None) -> EvaluationResult:
+def evaluate(
+    spec: ProjectSpec,
+    catalog: Catalog | None = None,
+    fx: FxTable | None = None,
+    with_sensitivity: bool = True,
+) -> EvaluationResult:
     from services.questions.coverage import compute_coverage  # import local : évite un couplage au chargement
 
     catalog = catalog or get_catalog()
@@ -156,11 +178,17 @@ def evaluate(spec: ProjectSpec, catalog: Catalog | None = None, fx: FxTable | No
     high_sizing = build_sizing(spec, tier=next_tier(sizing.tier))
     weights, weight_reasons = compute_weights(spec)
     budget_usd, budget_warning = _budget_in_usd(spec, fx)
+    rate_usd, rate_warning = _hourly_rate_usd(spec, fx)
     imposed, imposed_warning = _imposed_provider(spec)
 
     currency = spec.constraints.budget_currency
     display_currency = currency.value if currency else None
     display_rate = fx.rate(display_currency)
+
+    def to_display(amount: float | None) -> float | None:
+        if amount is None or not display_rate:
+            return None
+        return round(amount * display_rate, 2)
 
     drafts = []
     for arch in get_architectures():
@@ -221,6 +249,12 @@ def evaluate(spec: ProjectSpec, catalog: Catalog | None = None, fx: FxTable | No
                 f"({budget_usd:.2f} $ US) : le budget n'est pas garanti si le trafic augmente."
             )
 
+        maintenance = (
+            round(arch.maintenance_hours_per_month * rate_usd, 2) if rate_usd is not None else None
+        )
+        total_low_m = round(low.total + maintenance, 2) if maintenance is not None else None
+        total_high_m = round(high_total + maintenance, 2) if maintenance is not None else None
+
         results.append(
             ArchitectureResult(
                 id=arch.id,
@@ -231,14 +265,21 @@ def evaluate(spec: ProjectSpec, catalog: Catalog | None = None, fx: FxTable | No
                 eliminated_reasons=eliminated,
                 cost_low=low.total,
                 cost_high=high_total,
-                cost_low_display=round(low.total * display_rate, 2) if display_rate else None,
-                cost_high_display=round(high_total * display_rate, 2) if display_rate else None,
+                cost_low_display=to_display(low.total),
+                cost_high_display=to_display(high_total),
                 within_budget_low=within_low,
                 within_budget_high=within_high,
                 budget_risk=risk,
+                maintenance_cost_monthly=maintenance,
+                maintenance_cost_display=to_display(maintenance),
+                total_low_with_maintenance=total_low_m,
+                total_high_with_maintenance=total_high_m,
+                total_low_with_maintenance_display=to_display(total_low_m),
+                total_high_with_maintenance_display=to_display(total_high_m),
                 estimate_complete=low.complete and high.complete,
                 needs_verification=low.needs_verification or high.needs_verification,
                 lines=low.lines,
+                graph=build_graph(arch.id, low.lines),
                 unpriced=low.unpriced,
                 scores=scores,
                 total_score=total,
@@ -258,7 +299,8 @@ def evaluate(spec: ProjectSpec, catalog: Catalog | None = None, fx: FxTable | No
             recommended_id = result.id
             break
 
-    global_warnings = _global_warnings(spec, sizing.tier, [budget_warning, imposed_warning])
+    global_warnings = _global_warnings(spec, sizing.tier, [budget_warning, rate_warning, imposed_warning])
+
     if recommended_id is not None:
         recommended = next(r for r in results if r.id == recommended_id)
         if recommended.budget_risk == BudgetRisk.possible:
@@ -268,8 +310,30 @@ def evaluate(spec: ProjectSpec, catalog: Catalog | None = None, fx: FxTable | No
                 f"({recommended.cost_high:.2f} $ US) : le budget n'est pas garanti si le trafic augmente."
             )
 
+    if rate_usd is not None:
+        live = [r for r in results if r.verdict != Verdict.eliminated]
+        if live:
+            cheapest_host = min(live, key=lambda r: r.cost_low)
+            cheapest_total = min(live, key=lambda r: r.total_low_with_maintenance)
+            if cheapest_host.id != cheapest_total.id:
+                global_warnings.append(
+                    f"{cheapest_host.label} est le moins cher à héberger ({cheapest_host.cost_low:.2f} $ US "
+                    f"par mois) mais n'est pas le moins cher avec la maintenance : {cheapest_total.label} "
+                    f"coûte {cheapest_total.total_low_with_maintenance:.2f} $ US par mois, maintenance comprise."
+                )
+
     report = compute_coverage(spec)
-    return EvaluationResult(
+    if report.missing:
+        global_warnings.append(
+            f"{len(report.missing)} informations obligatoires manquent : le dimensionnement repose sur "
+            "des hypothèses et la recommandation peut changer."
+        )
+    if report.unknown:
+        global_warnings.append(
+            f"{len(report.unknown)} réponse(s) « je ne sais pas » remplacée(s) par des hypothèses."
+        )
+
+    result = EvaluationResult(
         display_currency=display_currency,
         fx_rate=display_rate,
         fx_as_of=fx.as_of if display_rate and display_currency != "USD" else None,
@@ -284,3 +348,11 @@ def evaluate(spec: ProjectSpec, catalog: Catalog | None = None, fx: FxTable | No
         recommended_id=recommended_id,
         coverage_missing=[f.path for f in report.missing],
     )
+
+    if with_sensitivity:
+        result.sensitivity = compute_sensitivity(
+            spec,
+            result,
+            lambda variant: evaluate(variant, catalog=catalog, fx=fx, with_sensitivity=False),
+        )
+    return result

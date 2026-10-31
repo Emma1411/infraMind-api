@@ -213,6 +213,12 @@ _QUESTIONS: list[Question] = [
             ("advanced", "À l'aise"),
         ),
     ),
+    _q(
+        "team.hourly_rate", QuestionType.number,
+        "Quel est ton tarif horaire pour la maintenance (dans la devise du budget) ?",
+        "Il permet de comparer le coût réel de chaque architecture : une infrastructure moins chère à héberger peut coûter plus cher à maintenir.",
+        priority=2,
+    ),
     # ---------- constraints ----------
     _q(
         "constraints.budget_max_monthly", QuestionType.number,

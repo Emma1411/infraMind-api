@@ -50,6 +50,50 @@ class AvailabilityDetail(BaseModel):
     overall_why: str
 
 
+class SensitivityScenario(BaseModel):
+    value: str
+    label: str
+    cost_low: float
+    cost_high: float
+    recommended_id: str | None = None
+    is_current: bool = False
+
+
+class SensitivityEntry(BaseModel):
+    path: str
+    question: str
+    status: str  # "known" ou "assumed"
+    current_label: str
+    arch_id: str
+    cost_min: float
+    cost_max: float
+    spread: float
+    changes_recommendation: bool
+    scenarios: list[SensitivityScenario]
+
+class GraphNode(BaseModel):
+    id: str
+    label: str
+    kind: str  # user, compute, database, storage, network, backup ou other
+    description: str = ""
+    x: int
+    y: int
+    monthly_cost: float = 0.0
+    lines: list[CostLine] = Field(default_factory=list)
+
+
+class GraphEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    label: str = ""
+    animated: bool = True
+
+
+class ArchitectureGraph(BaseModel):
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+
 class ArchitectureResult(BaseModel):
     id: str
     provider: str
@@ -64,10 +108,17 @@ class ArchitectureResult(BaseModel):
     within_budget_low: bool | None = None
     within_budget_high: bool | None = None
     budget_risk: BudgetRisk | None = None
+    maintenance_cost_monthly: float | None = None
+    maintenance_cost_display: float | None = None
+    total_low_with_maintenance: float | None = None
+    total_high_with_maintenance: float | None = None
+    total_low_with_maintenance_display: float | None = None
+    total_high_with_maintenance_display: float | None = None
     estimate_complete: bool
     needs_verification: bool
     lines: list[CostLine] = Field(default_factory=list)
     unpriced: list[UnpricedLine] = Field(default_factory=list)
+    graph: ArchitectureGraph | None = None
     scores: list[CriterionScore] = Field(default_factory=list)
     total_score: float
     availability: AvailabilityDetail
@@ -92,3 +143,4 @@ class EvaluationResult(BaseModel):
     ranking: list[ArchitectureResult]
     recommended_id: str | None = None
     coverage_missing: list[str] = Field(default_factory=list)
+    sensitivity: list[SensitivityEntry] = Field(default_factory=list)

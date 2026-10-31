@@ -1,0 +1,81 @@
+{
+  "graphs": {
+    "hetzner_vps": {
+      "nodes": [
+        {"id": "users", "label": "Utilisateurs", "kind": "user", "x": 0, "y": 150, "description": "Visiteurs de l'application, depuis leur navigateur."},
+        {"id": "net", "label": "Réseau public", "kind": "network", "x": 230, "y": 150, "prefixes": ["hetzner.ipv4", "hetzner.extra_traffic"], "description": "Adresse IPv4 publique et trafic sortant au-delà du quota inclus."},
+        {"id": "server", "label": "VPS Hetzner", "kind": "compute", "x": 460, "y": 150, "prefixes": ["hetzner.cpx", "hetzner.ccx"], "description": "Application et base de données sur la même machine."},
+        {"id": "volume", "label": "Volume SSD", "kind": "storage", "x": 690, "y": 40, "optional": true, "prefixes": ["hetzner.volume"], "description": "Espace disque supplémentaire quand le disque du serveur ne suffit pas."},
+        {"id": "backup", "label": "Sauvegardes", "kind": "backup", "x": 690, "y": 260, "prefixes": ["hetzner.backup"], "description": "Sauvegardes automatiques du serveur entier."}
+      ],
+      "edges": [
+        {"source": "users", "target": "net", "label": "HTTPS"},
+        {"source": "net", "target": "server", "label": "HTTPS"},
+        {"source": "server", "target": "volume", "label": "Disque"},
+        {"source": "server", "target": "backup", "label": "Sauvegardes", "animated": false}
+      ]
+    },
+    "aws_ec2_rds": {
+      "nodes": [
+        {"id": "users", "label": "Utilisateurs", "kind": "user", "x": 0, "y": 150, "description": "Visiteurs de l'application, depuis leur navigateur."},
+        {"id": "net", "label": "Réseau public", "kind": "network", "x": 230, "y": 150, "prefixes": ["aws.ipv4", "aws.egress"], "description": "Adresse IPv4 publique et trafic sortant."},
+        {"id": "ec2", "label": "Instance EC2", "kind": "compute", "x": 460, "y": 150, "prefixes": ["aws.ec2.", "aws.ebs."], "description": "Serveur virtuel qui exécute l'application, avec son disque système."},
+        {"id": "rds", "label": "Base RDS", "kind": "database", "x": 690, "y": 40, "optional": true, "prefixes": ["aws.rds."], "description": "Base de données managée en Single-AZ."},
+        {"id": "s3", "label": "Stockage S3", "kind": "storage", "x": 690, "y": 260, "optional": true, "prefixes": ["aws.s3."], "description": "Stockage des fichiers envoyés par les utilisateurs."}
+      ],
+      "edges": [
+        {"source": "users", "target": "net", "label": "HTTPS"},
+        {"source": "net", "target": "ec2", "label": "HTTPS"},
+        {"source": "ec2", "target": "rds", "label": "SQL"},
+        {"source": "ec2", "target": "s3", "label": "Fichiers"}
+      ]
+    },
+    "aws_fargate_rds": {
+      "nodes": [
+        {"id": "users", "label": "Utilisateurs", "kind": "user", "x": 0, "y": 150, "description": "Visiteurs de l'application, depuis leur navigateur."},
+        {"id": "net", "label": "Réseau public", "kind": "network", "x": 180, "y": 150, "prefixes": ["aws.ipv4", "aws.egress"], "description": "Adresses IPv4 publiques et trafic sortant."},
+        {"id": "alb", "label": "Load balancer", "kind": "network", "x": 360, "y": 150, "prefixes": ["aws.alb"], "description": "Répartit le trafic entre les conteneurs."},
+        {"id": "fargate", "label": "Conteneurs Fargate", "kind": "compute", "x": 540, "y": 150, "prefixes": ["aws.fargate."], "description": "Application en conteneur, sans serveur à administrer."},
+        {"id": "rds", "label": "Base RDS", "kind": "database", "x": 720, "y": 40, "optional": true, "prefixes": ["aws.rds."], "description": "Base de données managée en Single-AZ."},
+        {"id": "s3", "label": "Stockage S3", "kind": "storage", "x": 720, "y": 260, "optional": true, "prefixes": ["aws.s3."], "description": "Stockage des fichiers envoyés par les utilisateurs."}
+      ],
+      "edges": [
+        {"source": "users", "target": "net", "label": "HTTPS"},
+        {"source": "net", "target": "alb", "label": "HTTPS"},
+        {"source": "alb", "target": "fargate", "label": "HTTP"},
+        {"source": "fargate", "target": "rds", "label": "SQL"},
+        {"source": "fargate", "target": "s3", "label": "Fichiers"}
+      ]
+    },
+    "gcp_cloud_run_sql": {
+      "nodes": [
+        {"id": "users", "label": "Utilisateurs", "kind": "user", "x": 0, "y": 150, "description": "Visiteurs de l'application, depuis leur navigateur."},
+        {"id": "net", "label": "Réseau public", "kind": "network", "x": 230, "y": 150, "prefixes": ["gcp.egress"], "description": "Trafic sortant vers les utilisateurs."},
+        {"id": "run", "label": "Cloud Run", "kind": "compute", "x": 460, "y": 150, "prefixes": ["gcp.cloud_run."], "description": "Application en conteneur, qui descend à zéro quand personne ne l'utilise."},
+        {"id": "sql", "label": "Cloud SQL", "kind": "database", "x": 690, "y": 40, "optional": true, "prefixes": ["gcp.cloud_sql."], "description": "Base de données managée, avec ses sauvegardes."},
+        {"id": "storage", "label": "Cloud Storage", "kind": "storage", "x": 690, "y": 260, "optional": true, "prefixes": ["gcp.storage."], "description": "Stockage des fichiers envoyés par les utilisateurs."}
+      ],
+      "edges": [
+        {"source": "users", "target": "net", "label": "HTTPS"},
+        {"source": "net", "target": "run", "label": "HTTPS"},
+        {"source": "run", "target": "sql", "label": "SQL"},
+        {"source": "run", "target": "storage", "label": "Fichiers"}
+      ]
+    },
+    "azure_vm_postgres": {
+      "nodes": [
+        {"id": "users", "label": "Utilisateurs", "kind": "user", "x": 0, "y": 150, "description": "Visiteurs de l'application, depuis leur navigateur."},
+        {"id": "net", "label": "Réseau public", "kind": "network", "x": 230, "y": 150, "prefixes": ["azure.ipv4", "azure.egress"], "description": "Adresse IPv4 publique et trafic sortant."},
+        {"id": "vm", "label": "Machine virtuelle", "kind": "compute", "x": 460, "y": 150, "prefixes": ["azure.vm.", "azure.disk."], "description": "Serveur virtuel qui exécute l'application, avec son disque système."},
+        {"id": "pg", "label": "PostgreSQL", "kind": "database", "x": 690, "y": 40, "optional": true, "prefixes": ["azure.postgresql."], "description": "Base de données managée, calcul et stockage."},
+        {"id": "blob", "label": "Blob Storage", "kind": "storage", "x": 690, "y": 260, "optional": true, "prefixes": ["azure.blob."], "description": "Stockage des fichiers envoyés par les utilisateurs."}
+      ],
+      "edges": [
+        {"source": "users", "target": "net", "label": "HTTPS"},
+        {"source": "net", "target": "vm", "label": "HTTPS"},
+        {"source": "vm", "target": "pg", "label": "SQL"},
+        {"source": "vm", "target": "blob", "label": "Fichiers"}
+      ]
+    }
+  }
+}
