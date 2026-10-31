@@ -33,8 +33,8 @@ class Unit(str, Enum):
     per_tb = "per_tb"
     per_vcpu_second = "per_vcpu_second"
     per_gb_second = "per_gb_second"
-    per_million_requests = "per_million_requests"
     percent_of_server = "percent_of_server"
+    per_million_requests = "per_million_requests"
 
 
 class PriceItem(BaseModel):

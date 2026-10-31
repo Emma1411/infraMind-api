@@ -9,6 +9,12 @@ class Verdict(str, Enum):
     eliminated = "eliminated"
 
 
+class BudgetRisk(str, Enum):
+    none = "none"          # sous le budget, même au palier supérieur
+    possible = "possible"  # sous le budget au palier courant, au-dessus au palier supérieur
+    over = "over"          # au-dessus du budget dès le palier courant
+
+
 class CostLine(BaseModel):
     item_id: str
     label: str
@@ -35,6 +41,15 @@ class WeightInfo(BaseModel):
     weight: float
 
 
+class AvailabilityDetail(BaseModel):
+    application_score: int
+    application_why: str
+    database_score: int | None = None
+    database_why: str | None = None
+    overall_score: int
+    overall_why: str
+
+
 class ArchitectureResult(BaseModel):
     id: str
     provider: str
@@ -46,12 +61,16 @@ class ArchitectureResult(BaseModel):
     cost_high: float
     cost_low_display: float | None = None
     cost_high_display: float | None = None
+    within_budget_low: bool | None = None
+    within_budget_high: bool | None = None
+    budget_risk: BudgetRisk | None = None
     estimate_complete: bool
     needs_verification: bool
     lines: list[CostLine] = Field(default_factory=list)
     unpriced: list[UnpricedLine] = Field(default_factory=list)
     scores: list[CriterionScore] = Field(default_factory=list)
     total_score: float
+    availability: AvailabilityDetail
     requirements_unmet: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     maintenance_hours_per_month: float

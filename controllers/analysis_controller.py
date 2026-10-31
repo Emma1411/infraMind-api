@@ -12,6 +12,8 @@ from services.questions.answers import AnswerError, apply_answers
 from services.questions.builder import build_questions
 from services.questions.coverage import compute_coverage
 from utils.sanitize import mask_secrets
+from models.evaluation import EvaluationResult
+from services.engine.evaluate import evaluate
 
 logger = logging.getLogger(__name__)
 
@@ -110,3 +112,11 @@ def answers(payload: AnswersRequest) -> AnswersResponse:
         domain_status=report.domain_status(),
         is_complete=report.is_complete,
     )
+
+class EvaluateRequest(BaseModel):
+    spec: ProjectSpec
+
+
+@router.post("/evaluate", response_model=EvaluationResult)
+def evaluate_spec(payload: EvaluateRequest) -> EvaluationResult:
+    return evaluate(payload.spec)

@@ -123,6 +123,16 @@ def test_every_provider_declares_its_reference_region():
         assert provider.reference_regions
         assert provider.region_note.strip()
 
+def test_gcp_cloud_run_prices_and_quotas_match_google_page():
+    catalog = get_catalog()
+    assert catalog.item("gcp.cloud_run.vcpu_second_request_based").free_quota == 180000
+    assert catalog.item("gcp.cloud_run.memory_request_based").free_quota == 360000
+    assert catalog.item("gcp.cloud_run.requests").free_quota == 2
+    assert catalog.item("gcp.cloud_run.vcpu_second_instance_based").free_quota == 240000
+    assert catalog.item("gcp.cloud_run.memory_second_instance_based").free_quota == 450000
+    assert catalog.amount("gcp.cloud_run.memory_request_based") == pytest.approx(0.0000025)
+    assert catalog.amount("gcp.cloud_run.requests") == pytest.approx(0.40)
+
 
 def test_price_basis_mentions_regions_scope_and_date():
     text = get_catalog().price_basis("hetzner")

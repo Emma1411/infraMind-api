@@ -1,32 +1,207 @@
+
 {
   "provider": "gcp",
   "label": "Google Cloud (États-Unis)",
   "currency": "USD",
-  "reference_regions": ["us-central1"],
-  "region_note": "Quotas gratuits Cloud Run calculés sur us-central1. Les régions de niveau Tier 2 coûtent plus cher (par exemple 0,0000336 $/vCPU-s au lieu de 0,000024 en mode requête) : confirmer le niveau de la région choisie.",
+  "reference_regions": [
+    "us-central1"
+  ],
+  "region_note": "Quotas gratuits Cloud Run calculés sur us-central1. Les régions de niveau Tier 2 coûtent plus cher (par exemple, 0,0000336 $/vCPU-s au lieu de 0,000024 en mode requête) : confirmer le niveau de la région choisie.",
   "as_of": "2026-10-30",
   "source": "Relevés communiqués par l'utilisateur, tarifs consultés le 30 octobre 2026, hors taxes",
   "items": [
-    {"id": "gcp.e2_small", "category": "compute", "label": "Compute Engine e2-small", "status": "reported", "unit": "per_month", "amount": 12.23, "ram_gb": 2, "note": "CPU partagé"},
-    {"id": "gcp.e2_medium", "category": "compute", "label": "Compute Engine e2-medium", "status": "reported", "unit": "per_month", "amount": 24.46, "ram_gb": 4, "note": "CPU partagé"},
-    {"id": "gcp.e2_standard_2", "category": "compute", "label": "Compute Engine e2-standard-2", "status": "reported", "unit": "per_month", "amount": 49.12, "vcpu": 2, "ram_gb": 8},
-    {"id": "gcp.cloud_run.vcpu_second_request_based", "category": "compute", "label": "Cloud Run : vCPU (facturation à la requête, supposée)", "status": "to_verify", "unit": "per_vcpu_second", "amount": 0.000024, "note": "Mode de facturation supposé d'après ce tarif, à confirmer. Ne jamais combiner avec la mémoire du mode instance."},
-    {"id": "gcp.cloud_run.memory_request_based", "category": "compute", "label": "Cloud Run : mémoire (facturation à la requête)", "status": "missing", "note": "Prix non fourni"},
-    {"id": "gcp.cloud_run.vcpu_second_instance_based", "category": "compute", "label": "Cloud Run : vCPU (instance toujours allouée, supposé)", "status": "to_verify", "unit": "per_vcpu_second", "amount": 0.000018, "free_quota": 240000, "note": "Mode de facturation supposé d'après ce tarif, à confirmer"},
-    {"id": "gcp.cloud_run.memory_second_instance_based", "category": "compute", "label": "Cloud Run : mémoire (instance toujours allouée, supposé)", "status": "to_verify", "unit": "per_gb_second", "amount": 0.000002, "free_quota": 450000, "note": "Exemple du relevé : 1 Gio pendant 730 h = 5,256 $ brut, 0,90 $ de crédit, 4,356 $ net"},
-    {"id": "gcp.cloud_sql.vcpu", "category": "database", "label": "Cloud SQL : CPU", "status": "reported", "unit": "per_vcpu_month", "amount": 30.15, "note": "Unité supposée par vCPU et par mois, à confirmer"},
-    {"id": "gcp.cloud_sql.ram", "category": "database", "label": "Cloud SQL : mémoire", "status": "reported", "unit": "per_gb_month", "amount": 5.11},
-    {"id": "gcp.cloud_sql.ssd", "category": "database", "label": "Cloud SQL : stockage SSD", "status": "reported", "unit": "per_gb_month", "amount": 0.17},
-    {"id": "gcp.cloud_sql.backup", "category": "backup", "label": "Cloud SQL : sauvegardes", "status": "reported", "unit": "per_gb_month", "amount": 0.08},
-    {"id": "gcp.storage.standard", "category": "storage", "label": "Cloud Storage Standard", "status": "reported", "unit": "per_gb_month", "amount": 0.020},
-    {"id": "gcp.storage.nearline", "category": "storage", "label": "Cloud Storage Nearline", "status": "reported", "unit": "per_gb_month", "amount": 0.010},
-    {"id": "gcp.ipv4_vm", "category": "network", "label": "IPv4 publique de VM", "status": "reported", "unit": "per_month", "amount": 3.65},
-    {"id": "gcp.cloud_nat", "category": "network", "label": "Cloud NAT : traitement", "status": "reported", "unit": "per_gb", "amount": 0.045},
-    {"id": "gcp.load_balancer", "category": "network", "label": "Load Balancer", "status": "reported", "unit": "per_month", "amount": 18.25},
-    {"id": "gcp.egress.first_1gib", "category": "network", "label": "Trafic sortant : premier Gio/mois", "status": "reported", "unit": "per_gb", "amount": 0.0, "note": "Gratuit. Tarifs vers l'Amérique du Nord, réseau standard. Trafic entrant gratuit."},
-    {"id": "gcp.egress.tier_1_1024gib", "category": "network", "label": "Trafic sortant : de 1 à 1 024 Gio/mois", "status": "reported", "unit": "per_gb", "amount": 0.12},
-    {"id": "gcp.egress.tier_1024_10240gib", "category": "network", "label": "Trafic sortant : de 1 024 à 10 240 Gio/mois", "status": "reported", "unit": "per_gb", "amount": 0.11},
-    {"id": "gcp.egress.tier_over_10240gib", "category": "network", "label": "Trafic sortant : au-delà de 10 240 Gio/mois", "status": "reported", "unit": "per_gb", "amount": 0.08},
-    {"id": "gcp.backup_dr", "category": "backup", "label": "Backup and DR", "status": "missing", "note": "Selon stockage et protection, tarif non fourni"}
+    {
+      "id": "gcp.cloud_run.vcpu_second_request_based",
+      "category": "compute",
+      "label": "Cloud Run : vCPU (CPU alloué pendant les requêtes)",
+      "status": "reported",
+      "unit": "per_vcpu_second",
+      "amount": 0.000024,
+      "free_quota": 180000,
+      "note": "Mode requête. Ne jamais combiner avec la mémoire du mode instance."
+    },
+    {
+      "id": "gcp.cloud_run.memory_request_based",
+      "category": "compute",
+      "label": "Cloud Run : mémoire (CPU alloué pendant les requêtes)",
+      "status": "reported",
+      "unit": "per_gb_second",
+      "amount": 0.0000025,
+      "free_quota": 360000,
+      "note": "Mode requête."
+    },
+    {
+      "id": "gcp.cloud_run.requests",
+      "category": "compute",
+      "label": "Cloud Run : requêtes (mode requête)",
+      "status": "reported",
+      "unit": "per_million_requests",
+      "amount": 0.40,
+      "free_quota": 2,
+      "note": "2 millions de requêtes gratuites par mois (quota exprimé en millions)"
+    },
+    {
+      "id": "gcp.cloud_run.vcpu_second_instance_based",
+      "category": "compute",
+      "label": "Cloud Run : vCPU (CPU toujours alloué)",
+      "status": "reported",
+      "unit": "per_vcpu_second",
+      "amount": 0.000018,
+      "free_quota": 240000,
+      "note": "Mode instance. Ne jamais combiner avec la mémoire du mode requête."
+    },
+    {
+      "id": "gcp.cloud_run.memory_second_instance_based",
+      "category": "compute",
+      "label": "Cloud Run : mémoire (CPU toujours alloué)",
+      "status": "reported",
+      "unit": "per_gb_second",
+      "amount": 0.000002,
+      "free_quota": 450000,
+      "note": "Mode instance. Exemple : 1 Gio pendant 730 h = 5,256 $ brut, 0,90 $ de crédit, 4,356 $ net"
+    },
+    {
+      "id": "gcp.e2_small",
+      "category": "compute",
+      "label": "Compute Engine e2-small",
+      "status": "reported",
+      "unit": "per_month",
+      "amount": 12.23,
+      "ram_gb": 2,
+      "note": "CPU partagé"
+    },
+    {
+      "id": "gcp.e2_medium",
+      "category": "compute",
+      "label": "Compute Engine e2-medium",
+      "status": "reported",
+      "unit": "per_month",
+      "amount": 24.46,
+      "ram_gb": 4,
+      "note": "CPU partagé"
+    },
+    {
+      "id": "gcp.e2_standard_2",
+      "category": "compute",
+      "label": "Compute Engine e2-standard-2",
+      "status": "reported",
+      "unit": "per_month",
+      "amount": 49.12,
+      "vcpu": 2,
+      "ram_gb": 8
+    },
+    {
+      "id": "gcp.cloud_sql.vcpu",
+      "category": "database",
+      "label": "Cloud SQL : CPU",
+      "status": "reported",
+      "unit": "per_vcpu_month",
+      "amount": 30.15,
+      "note": "Unité supposée par vCPU et par mois, à confirmer"
+    },
+    {
+      "id": "gcp.cloud_sql.ram",
+      "category": "database",
+      "label": "Cloud SQL : mémoire",
+      "status": "reported",
+      "unit": "per_gb_month",
+      "amount": 5.11
+    },
+    {
+      "id": "gcp.cloud_sql.ssd",
+      "category": "database",
+      "label": "Cloud SQL : stockage SSD",
+      "status": "reported",
+      "unit": "per_gb_month",
+      "amount": 0.17
+    },
+    {
+      "id": "gcp.cloud_sql.backup",
+      "category": "backup",
+      "label": "Cloud SQL : sauvegardes",
+      "status": "reported",
+      "unit": "per_gb_month",
+      "amount": 0.08
+    },
+    {
+      "id": "gcp.storage.standard",
+      "category": "storage",
+      "label": "Cloud Storage Standard",
+      "status": "reported",
+      "unit": "per_gb_month",
+      "amount": 0.020
+    },
+    {
+      "id": "gcp.storage.nearline",
+      "category": "storage",
+      "label": "Cloud Storage Nearline",
+      "status": "reported",
+      "unit": "per_gb_month",
+      "amount": 0.010
+    },
+    {
+      "id": "gcp.ipv4_vm",
+      "category": "network",
+      "label": "IPv4 publique de VM",
+      "status": "reported",
+      "unit": "per_month",
+      "amount": 3.65
+    },
+    {
+      "id": "gcp.cloud_nat",
+      "category": "network",
+      "label": "Cloud NAT : traitement",
+      "status": "reported",
+      "unit": "per_gb",
+      "amount": 0.045
+    },
+    {
+      "id": "gcp.load_balancer",
+      "category": "network",
+      "label": "Load Balancer",
+      "status": "reported",
+      "unit": "per_month",
+      "amount": 18.25
+    },
+    {
+      "id": "gcp.egress.first_1gib",
+      "category": "network",
+      "label": "Trafic sortant : premier Gio/mois",
+      "status": "reported",
+      "unit": "per_gb",
+      "amount": 0.0,
+      "note": "Gratuit. Tarifs vers l'Amérique du Nord, réseau standard. Trafic entrant gratuit."
+    },
+    {
+      "id": "gcp.egress.tier_1_1024gib",
+      "category": "network",
+      "label": "Trafic sortant : de 1 à 1 024 Gio/mois",
+      "status": "reported",
+      "unit": "per_gb",
+      "amount": 0.12
+    },
+    {
+      "id": "gcp.egress.tier_1024_10240gib",
+      "category": "network",
+      "label": "Trafic sortant : de 1 024 à 10 240 Gio/mois",
+      "status": "reported",
+      "unit": "per_gb",
+      "amount": 0.11
+    },
+    {
+      "id": "gcp.egress.tier_over_10240gib",
+      "category": "network",
+      "label": "Trafic sortant : au-delà de 10 240 Gio/mois",
+      "status": "reported",
+      "unit": "per_gb",
+      "amount": 0.08
+    },
+    {
+      "id": "gcp.backup_dr",
+      "category": "backup",
+      "label": "Backup and DR",
+      "status": "missing",
+      "note": "Selon stockage et protection, tarif non fourni"
+    }
   ]
 }

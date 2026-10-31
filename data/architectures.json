@@ -1,0 +1,99 @@
+{
+  "architectures": [
+    {
+      "id": "hetzner_vps",
+      "provider": "hetzner",
+      "label": "VPS Hetzner unique",
+      "summary": "Application et base de données sur un seul serveur, avec sauvegardes automatiques.",
+      "rpo_class": "daily",
+      "requires_ops": true,
+      "maintenance_hours_per_month": 6,
+      "availability_app": {"score": 1, "why": "Un seul serveur : une panne ou un redémarrage arrête l'application."},
+      "availability_db": {"score": 1, "why": "La base est sur le même serveur : elle tombe avec lui."},
+      "ratings": {
+        "security": {"score": 2, "why": "Tout sur une machine : pare-feu, correctifs et accès à gérer soi-même."},
+        "performance": {"score": 3, "why": "Ressources dédiées au serveur, mais application et base se partagent la machine."},
+        "scalability": {"score": 2, "why": "Montée en puissance en changeant de plan, avec une coupure."},
+        "maintenance": {"score": 1, "why": "Système, base et sauvegardes à administrer soi-même."},
+        "portability": {"score": 5, "why": "Linux et conteneurs standards, déplaçable chez n'importe quel hébergeur."},
+        "rollback": {"score": 2, "why": "Retour par snapshot ou sauvegarde du serveur entier, sans retour fin sur la base."}
+      }
+    },
+    {
+      "id": "aws_ec2_rds",
+      "provider": "aws",
+      "label": "AWS : EC2 et RDS",
+      "summary": "Serveur virtuel EC2 pour l'application et base managée RDS.",
+      "rpo_class": "point_in_time",
+      "requires_ops": true,
+      "maintenance_hours_per_month": 4,
+      "availability_app": {"score": 2, "why": "Une seule instance EC2 : une panne l'arrête tant qu'elle n'est pas remplacée."},
+      "availability_db": {"score": 3, "why": "RDS Single-AZ : gérée par AWS, mais une panne de la zone coupe la base. Multi-AZ possible, non chiffré ici."},
+      "ratings": {
+        "security": {"score": 4, "why": "Gestion fine des accès, réseau privé et chiffrement disponibles."},
+        "performance": {"score": 4, "why": "Serveur et base séparés, avec des tailles adaptées à chaque rôle."},
+        "scalability": {"score": 4, "why": "Changement de taille et réplicas de lecture possibles."},
+        "maintenance": {"score": 3, "why": "Base gérée, mais système du serveur à entretenir."},
+        "portability": {"score": 3, "why": "Serveur portable, mais réseau et base à reconstruire ailleurs."},
+        "rollback": {"score": 3, "why": "Snapshots de la base et du disque, retour manuel."}
+      }
+    },
+    {
+      "id": "aws_fargate_rds",
+      "provider": "aws",
+      "label": "AWS : Fargate et RDS",
+      "summary": "Application en conteneur sur Fargate derrière un load balancer, avec une base RDS.",
+      "rpo_class": "point_in_time",
+      "requires_ops": false,
+      "maintenance_hours_per_month": 3,
+      "availability_app": {"score": 3, "why": "Les tâches Fargate redémarrent seules derrière un load balancer ; une seule tâche au palier courant impose une courte coupure."},
+      "availability_db": {"score": 3, "why": "RDS Single-AZ : gérée par AWS, mais une panne de la zone coupe la base. Multi-AZ possible, non chiffré ici."},
+      "ratings": {
+        "security": {"score": 4, "why": "Gestion fine des accès, réseau privé et chiffrement disponibles."},
+        "performance": {"score": 4, "why": "Conteneurs dimensionnés par tâche, base séparée."},
+        "scalability": {"score": 5, "why": "Nombre de tâches ajustable sans gérer de serveur."},
+        "maintenance": {"score": 4, "why": "Aucun système à entretenir ; configuration AWS plus technique."},
+        "portability": {"score": 4, "why": "Application en conteneur, déplaçable ; réseau AWS spécifique."},
+        "rollback": {"score": 4, "why": "Retour à l'image précédente, snapshots de la base."}
+      }
+    },
+    {
+      "id": "gcp_cloud_run_sql",
+      "provider": "gcp",
+      "label": "Google Cloud : Cloud Run et Cloud SQL",
+      "summary": "Application en conteneur sur Cloud Run, avec une base managée Cloud SQL.",
+      "rpo_class": "point_in_time",
+      "requires_ops": false,
+      "maintenance_hours_per_month": 2,
+      "availability_app": {"score": 4, "why": "Cloud Run redémarre l'application seul et la répartit sur plusieurs zones."},
+      "availability_db": {"score": 3, "why": "Cloud SQL sans haute disponibilité : une panne de zone coupe la base. Option non chiffrée ici."},
+      "ratings": {
+        "security": {"score": 4, "why": "Gestion fine des accès, chiffrement et réseau privé disponibles."},
+        "performance": {"score": 4, "why": "Démarrage à froid possible en mode requête."},
+        "scalability": {"score": 5, "why": "Monte et descend jusqu'à zéro automatiquement."},
+        "maintenance": {"score": 5, "why": "Application et base entièrement gérées."},
+        "portability": {"score": 4, "why": "Conteneur standard et base exportable."},
+        "rollback": {"score": 4, "why": "Retour instantané à une révision précédente, sauvegardes de la base."}
+      }
+    },
+    {
+      "id": "azure_vm_postgres",
+      "provider": "azure",
+      "label": "Azure : machine virtuelle et PostgreSQL",
+      "summary": "Machine virtuelle Azure pour l'application et PostgreSQL Flexible Server managé.",
+      "rpo_class": "point_in_time",
+      "requires_ops": true,
+      "maintenance_hours_per_month": 4,
+      "availability_app": {"score": 2, "why": "Une seule machine virtuelle : une panne l'arrête."},
+      "availability_db": {"score": 3, "why": "PostgreSQL managé sans zone redondante ; la haute disponibilité (stockage doublé) n'est pas chiffrée."},
+      "ratings": {
+        "security": {"score": 4, "why": "Gestion fine des accès, réseau privé et chiffrement disponibles."},
+        "performance": {"score": 3, "why": "Instances de type Burstable : performance variable sous forte charge."},
+        "scalability": {"score": 3, "why": "Changement de taille de la machine avec une coupure."},
+        "maintenance": {"score": 3, "why": "Base gérée, mais système du serveur à entretenir."},
+        "portability": {"score": 3, "why": "Serveur portable, mais réseau et base à reconstruire ailleurs."},
+        "rollback": {"score": 3, "why": "Snapshots de disque et sauvegardes de la base."}
+      }
+    }
+  ]
+}
