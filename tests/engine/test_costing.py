@@ -145,3 +145,15 @@ def test_gcp_tier_m_total():
     sizing = build_sizing(ProjectSpec(), tier="m")
     estimate = BUILDERS["gcp_cloud_run_sql"](get_catalog(), sizing)
     assert estimate.total == pytest.approx(267.64, abs=0.1)
+
+def test_azure_storage_rounds_up_to_a_standard_size():
+    from services.engine.costing import azure_pg_storage
+
+    assert [azure_pg_storage(x) for x in (1, 10, 32, 33, 100, 200, 5000)] == [32, 32, 32, 64, 128, 256, 4096]
+
+
+def test_azure_postgres_storage_cost_follows_the_standard_size():
+    sizing = sizing_s(data={"data_size": "gb_10_100"})
+    estimate = BUILDERS["azure_vm_postgres"](get_catalog(), sizing)
+    line = next(l for l in estimate.lines if l.item_id == "azure.postgresql.storage")
+    assert line.monthly == pytest.approx(128 * 0.115, abs=0.01)

@@ -7,6 +7,14 @@ from services.engine.assumptions import SECONDS_PER_REQUEST, Sizing
 from services.engine.catalog import HOURS_PER_MONTH, Catalog
 
 SECONDS_PER_MONTH = HOURS_PER_MONTH * 3600
+AZURE_PG_STORAGE_SIZES = (32, 64, 128, 256, 512, 1024, 2048, 4096)
+
+def azure_pg_storage(db_gb: float) -> int:
+    """Plus petite taille standard supérieure ou égale à la taille de la base."""
+    for size in AZURE_PG_STORAGE_SIZES:
+        if db_gb <= size:
+            return size
+    return AZURE_PG_STORAGE_SIZES[-1]
 
 # Paliers de dimensionnement : tier -> élément du catalogue
 HETZNER_PLAN = {
@@ -549,12 +557,11 @@ def build_azure_vm_postgres(catalog: Catalog, s: Sizing) -> Estimate:
             f"{pg.vcpu} vCPU, {pg.ram_gb:g} Gio de RAM (calcul seul)",
         )
 
-        storage = max(32.0, s.db_gb)
-
+        storage = float(azure_pg_storage(s.db_gb))
         e.add(
             "azure.postgresql.storage",
             storage,
-            f"{storage:.0f} Go provisionnés (minimum de 32 Go supposé)",
+            f"{storage:.0f} Go provisionnés (taille standard Azure, minimum de 32 Go)",
         )
 
     if s.files_gb > 0:

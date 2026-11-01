@@ -1,0 +1,490 @@
+{
+  "arch_id": "aws_fargate_rds",
+  "title": "Déployer ton application sur AWS avec des conteneurs Fargate et une base RDS",
+  "intro": "Ce guide te mène de zéro à ton application en ligne dans un conteneur sur AWS Fargate (HTTPS inclus), avec une base PostgreSQL gérée par AWS. Aucun serveur à administrer : tu déposes ton image, et ECS Express Mode crée le reste. Suis les étapes dans l'ordre.",
+  "prerequisites": [
+    "Une application qui s'exécute dans un conteneur : un fichier Dockerfile à la racine du projet, et un serveur qui écoute sur un port précis.",
+    "Docker installé et lancé sur ton ordinateur (Docker Desktop, par exemple).",
+    "Un terminal sur ton ordinateur (PowerShell sous Windows, Terminal sous macOS ou Linux).",
+    "Une carte bancaire pour ton compte AWS."
+  ],
+  "steps": [
+    {
+      "id": "compte",
+      "title": "Créer ton compte AWS et choisir la région",
+      "where": "console",
+      "why": "Ton compte AWS regroupe tout ce que tu crées et la facturation. La région est l'endroit physique où tes ressources s'installent : les prix de ce guide sont ceux de la région [[region]].",
+      "checklist": [
+        "Crée un compte sur aws.amazon.com et connecte-toi à la console.",
+        "Active l'authentification multifacteur (MFA) sur ton compte racine, et évite de l'utiliser au quotidien.",
+        "En haut à droite de la console, choisis la région N. Virginia ([[region]]). Garde la même région pour toutes les étapes."
+      ],
+      "commands": [],
+      "expect": "La console AWS s'affiche avec la région [[region]] sélectionnée.",
+      "warning": "Une région différente affiche des prix différents et ne contient pas tes ressources : vérifie toujours la région en haut à droite.",
+      "optional": false,
+      "help": {
+        "common_cause": "Ton compte n'est pas encore activé : AWS peut mettre un peu de temps à valider un nouveau compte (moyen de paiement, vérification par téléphone).",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "créer un compte AWS et activer le MFA"
+      }
+    },
+    {
+      "id": "budget",
+      "title": "Créer un budget et des alertes (avant toute ressource)",
+      "where": "console",
+      "why": "AWS facture à l'usage. Une alerte te prévient avant qu'une mauvaise surprise s'installe.",
+      "checklist": [
+        "Dans la console : Billing and Cost Management, puis Budgets, puis Create budget.",
+        "Choisis Customize (advanced), puis Cost budget.",
+        "Montant mensuel : un peu au-dessus de l'estimation ([[monthly_total]] $ US par mois, hors taxes).",
+        "Alertes à 50 %, 80 % et 100 % du montant, avec ton adresse e-mail comme destinataire."
+      ],
+      "commands": [],
+      "expect": "Le budget apparaît dans la liste Budgets, avec ses alertes.",
+      "warning": "Un budget envoie des alertes mais ne bloque pas les dépenses : si tu reçois une alerte, agis tout de suite.",
+      "optional": false,
+      "help": {
+        "common_cause": "Une alerte sans destinataire est refusée : indique au moins une adresse e-mail pour chaque seuil.",
+        "doc_url": "https://docs.aws.amazon.com/cost-management/latest/userguide/create-cost-budget.html",
+        "doc_label": "Documentation AWS : créer un budget de coûts",
+        "search_query": "AWS Budgets créer un budget et une alerte e-mail"
+      }
+    },
+    {
+      "id": "iam",
+      "title": "Créer un accès pour la ligne de commande",
+      "where": "console",
+      "why": "Tu ne travailles jamais avec ton compte racine : tu crées un utilisateur dédié, avec une clé d'accès pour ton terminal.",
+      "checklist": [
+        "Console IAM, Users, Create user. Nom : [[app_slug]]-cli.",
+        "Donne-lui la politique AdministratorAccess : c'est simple pour ce guide, mais un projet durable utilise des droits plus restreints.",
+        "Sur l'utilisateur : Security credentials, Create access key, cas d'usage Command Line Interface (CLI).",
+        "Note l'identifiant de la clé d'accès et la clé secrète : la clé secrète n'est affichée qu'une seule fois."
+      ],
+      "commands": [],
+      "expect": "Tu as un identifiant de clé d'accès (il commence par AKIA) et une clé secrète.",
+      "warning": "Ne mets jamais ces clés dans ton code ni dans Git. Tu les supprimeras à la fin du guide.",
+      "optional": false,
+      "help": {
+        "common_cause": "AccessDenied plus loin dans le guide : la politique AdministratorAccess n'est pas attachée à l'utilisateur.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "AWS IAM créer un utilisateur et une clé d'accès CLI"
+      }
+    },
+    {
+      "id": "cli",
+      "title": "Installer l'outil AWS CLI et te connecter",
+      "where": "local",
+      "why": "L'AWS CLI est l'outil en ligne de commande d'AWS : tu l'utilises pour déposer ton image.",
+      "checklist": [
+        "Installe l'AWS CLI en suivant la documentation officielle pour ton système, puis ouvre un nouveau terminal.",
+        "aws configure te pose quatre questions : l'identifiant de clé d'accès, la clé secrète, la région par défaut ([[region]]) et le format de sortie (json).",
+        "Le numéro de compte à 12 chiffres affiché à la dernière commande s'appelle VOTRE_ID_COMPTE dans la suite."
+      ],
+      "commands": [
+        {
+          "label": "Vérifier l'installation",
+          "language": "bash",
+          "code": "aws --version"
+        },
+        {
+          "label": "Enregistrer tes clés (suis les questions affichées)",
+          "language": "bash",
+          "code": "aws configure"
+        },
+        {
+          "label": "Vérifier que la connexion fonctionne et afficher ton numéro de compte",
+          "language": "bash",
+          "code": "aws sts get-caller-identity --query Account --output text"
+        },
+        {
+          "label": "Vérifier que Docker tourne",
+          "language": "bash",
+          "code": "docker --version"
+        }
+      ],
+      "expect": "La commande get-caller-identity affiche un nombre à 12 chiffres, sans erreur.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "La commande aws n'est pas reconnue : ferme puis rouvre le terminal après l'installation. InvalidClientTokenId : la clé d'accès ou la clé secrète est mal copiée, relance aws configure.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "installer AWS CLI Windows aws configure tutoriel"
+      }
+    },
+    {
+      "id": "image",
+      "title": "Construire ton image et la déposer dans Amazon ECR",
+      "where": "local",
+      "why": "ECR est le magasin d'images de conteneurs d'AWS. Fargate y va chercher ton application.",
+      "checklist": [
+        "Place-toi dans le dossier de ton projet, celui qui contient ton Dockerfile.",
+        "Remplace VOTRE_ID_COMPTE par ton numéro de compte dans les commandes qui en ont besoin.",
+        "La construction et le dépôt de l'image peuvent prendre quelques minutes."
+      ],
+      "commands": [
+        {
+          "label": "Créer le dépôt d'images",
+          "language": "bash",
+          "code": "aws ecr create-repository --repository-name [[app_slug]] --region [[region]]"
+        },
+        {
+          "label": "Autoriser Docker à déposer dans ECR",
+          "language": "bash",
+          "code": "aws ecr get-login-password --region [[region]] | docker login --username AWS --password-stdin VOTRE_ID_COMPTE.dkr.ecr.[[region]].amazonaws.com"
+        },
+        {
+          "label": "Construire l'image (compatible avec Fargate)",
+          "language": "bash",
+          "code": "docker build --platform linux/amd64 -t [[app_slug]] ."
+        },
+        {
+          "label": "Étiqueter l'image avec l'adresse du dépôt",
+          "language": "bash",
+          "code": "docker tag [[app_slug]]:latest VOTRE_ID_COMPTE.dkr.ecr.[[region]].amazonaws.com/[[app_slug]]:latest"
+        },
+        {
+          "label": "Déposer l'image",
+          "language": "bash",
+          "code": "docker push VOTRE_ID_COMPTE.dkr.ecr.[[region]].amazonaws.com/[[app_slug]]:latest"
+        }
+      ],
+      "expect": "docker login affiche Login Succeeded, et docker push se termine par une ligne avec un condensé (digest). Ton image apparaît dans la console ECR.",
+      "warning": "L'option --platform linux/amd64 évite l'erreur exec format error si tu construis l'image sur un Mac à puce Apple (ARM).",
+      "optional": false,
+      "help": {
+        "common_cause": "no basic auth credentials ou denied au dépôt : la commande docker login n'a pas été lancée, ou elle est expirée (elle dure quelques heures). Relance-la. Le dépôt et la région de la commande doivent être les mêmes.",
+        "doc_url": "https://docs.aws.amazon.com/AmazonECR/latest/userguide/getting-started-console.html",
+        "doc_label": "Documentation AWS : déposer une image dans ECR",
+        "search_query": "AWS ECR docker push tutoriel"
+      }
+    },
+    {
+      "id": "base",
+      "title": "Créer la base de données PostgreSQL (RDS)",
+      "where": "console",
+      "only_if": "database",
+      "why": "RDS est une base PostgreSQL gérée par AWS : installation, mises à jour et sauvegardes sont prises en charge pour toi.",
+      "checklist": [
+        "Console RDS, puis Create database, puis Standard create, moteur PostgreSQL.",
+        "Templates : Dev/Test, avec Single DB instance (une seule base, sans réplique).",
+        "DB instance identifier : [[app_slug]]-db. Master username : postgres. Choisis un mot de passe solide et note-le.",
+        "Instance configuration : [[rds_class]] ([[rds_vcpu]] vCPU, [[rds_ram_gb]] Gio de RAM), dans la catégorie Burstable classes.",
+        "Storage : [[rds_storage_gb]] GiB, type gp3.",
+        "Connectivity : Don't connect to an EC2 compute resource, dans le VPC par défaut. Public access : No. Crée un nouveau groupe de sécurité nommé [[app_slug]]-db-sg.",
+        "Additional configuration : Initial database name = appdb (sans nom, RDS ne crée aucune base).",
+        "Garde les sauvegardes automatiques activées, puis clique sur Create database. L'opération prend plusieurs minutes."
+      ],
+      "commands": [],
+      "expect": "La base passe à l'état Available. Dans l'onglet Connectivity & security, note l'Endpoint : il s'appelle VOTRE_ENDPOINT_RDS dans la suite.",
+      "warning": "La base est facturée tant qu'elle existe, même sans visiteur. Ne la rends jamais publique : le service Fargate la joindra par le réseau privé.",
+      "optional": false,
+      "help": {
+        "common_cause": "La création échoue : le mot de passe ne respecte pas les règles (longueur ou caractères interdits), ou un quota est atteint. Lis le message affiché en haut de la page.",
+        "doc_url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_GettingStarted.CreatingConnecting.PostgreSQL.html",
+        "doc_label": "Documentation AWS : créer une base PostgreSQL RDS",
+        "search_query": "AWS RDS PostgreSQL créer une base tutoriel débutant"
+      }
+    },
+    {
+      "id": "service",
+      "title": "Créer le service avec ECS Express Mode",
+      "where": "console",
+      "why": "Express Mode ne demande que ton image et deux rôles : il crée lui-même le service Fargate, l'équilibreur de charge avec HTTPS, la mise à l'échelle automatique et les journaux.",
+      "checklist": [
+        "Console Amazon ECS, puis Express mode dans le menu de gauche, puis Create.",
+        "Container image URI : VOTRE_ID_COMPTE.dkr.ecr.[[region]].amazonaws.com/[[app_slug]]:latest",
+        "Container port : le port sur lequel ton application écoute.",
+        "Task execution role et Infrastructure role : crée-les si la console te le propose, sinon choisis des rôles existants.",
+        "Additional configurations : CPU [[task_vcpu]] vCPU et mémoire [[task_memory_gib]] Go ([[task_cpu_units]] unités de CPU et [[task_memory_mib]] Mio si la console demande des unités), avec au minimum [[tasks]] tâche(s) si l'option existe.",
+        "Variables d'environnement, si ton projet a une base de données : DB_HOST = VOTRE_ENDPOINT_RDS, DB_PORT = 5432, DB_NAME = appdb, DB_USER = postgres, DB_PASSWORD = le mot de passe de la base (adapte les noms à ton application).",
+        "Si la console demande un réseau : choisis le même VPC que ta base.",
+        "Clique sur Create. La création prend quelques minutes."
+      ],
+      "commands": [],
+      "expect": "Le service passe à l'état actif et affiche une adresse HTTPS publique.",
+      "warning": "Express Mode crée un équilibreur de charge, facturé tant qu'il existe (environ [[alb_cost]] $ par mois dans l'estimation). Vérifie le nombre de tâches : l'estimation en suppose [[tasks]]. Le mot de passe saisi en variable d'environnement est visible par toute personne qui a accès à la console : un projet durable utilise AWS Secrets Manager.",
+      "optional": false,
+      "help": {
+        "common_cause": "Le service redémarre en boucle : l'application plante au démarrage (variable manquante, mauvais port) ou l'image n'a pas la bonne architecture (exec format error). Consulte l'onglet Logs du service.",
+        "doc_url": "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-overview.html",
+        "doc_label": "Documentation AWS : ECS Express Mode",
+        "search_query": "Amazon ECS Express Mode tutoriel déployer un conteneur"
+      }
+    },
+    {
+      "id": "reseau-base",
+      "title": "Autoriser le service à joindre la base",
+      "where": "console",
+      "only_if": "database",
+      "why": "Par défaut, la base refuse toute connexion. Il faut lui dire d'accepter celles qui viennent de ton service.",
+      "checklist": [
+        "Console ECS, ton service Express, onglet Networking : note le groupe de sécurité du service.",
+        "Console RDS, ta base, onglet Connectivity & security : ouvre le lien du groupe de sécurité VPC de la base.",
+        "Edit inbound rules, puis Add rule : type PostgreSQL (port 5432), source = le groupe de sécurité du service.",
+        "Enregistre la règle, puis relance le service si l'application n'avait pas pu se connecter."
+      ],
+      "commands": [],
+      "expect": "Les messages de l'application ne montrent plus d'erreur de connexion à la base.",
+      "warning": "N'ouvre jamais le port 5432 à tout Internet : la source doit être le groupe de sécurité du service.",
+      "optional": false,
+      "help": {
+        "common_cause": "La connexion expire (timeout) : la règle entrante est absente, sa source n'est pas le bon groupe de sécurité, ou le service et la base ne sont pas dans le même VPC.",
+        "doc_url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_GettingStarted.CreatingConnecting.PostgreSQL.html",
+        "doc_label": "Documentation AWS : connexion à RDS",
+        "search_query": "AWS RDS autoriser un groupe de sécurité ECS port 5432"
+      }
+    },
+    {
+      "id": "verification",
+      "title": "Vérifier que l'application répond",
+      "where": "local",
+      "why": "Il faut tester depuis l'extérieur, comme le ferait un utilisateur.",
+      "checklist": [
+        "Ouvre l'adresse HTTPS du service dans ton navigateur.",
+        "Teste une action complète de ton application (connexion, création d'un élément).",
+        "En cas de problème : console ECS, ton service, onglet Logs.",
+        "Si tu as une base de données, elle est vide au départ : ton application doit créer ses tables elle-même (migrations)."
+      ],
+      "commands": [],
+      "expect": "Ton application s'affiche en HTTPS et les messages ne montrent aucune erreur.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Erreur 502 ou 503 : le conteneur n'est pas encore prêt, ou le contrôle de santé échoue. Vérifie le port du conteneur et le chemin de contrôle de santé du service.",
+        "doc_url": "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-overview.html",
+        "doc_label": "Documentation AWS : ECS Express Mode",
+        "search_query": "ECS Express Mode erreur 502 health check"
+      }
+    },
+    {
+      "id": "mise-a-jour",
+      "title": "Publier une nouvelle version, ou revenir à la précédente",
+      "where": "local",
+      "why": "Chaque version de ton image porte une étiquette. Pour mettre à jour ou revenir en arrière, tu changes l'étiquette utilisée par le service.",
+      "checklist": [
+        "Dépose la nouvelle version avec une étiquette précise (v2, v3...) plutôt que latest : tu sais ainsi toujours quelle version tourne.",
+        "Console ECS, ton service Express, puis Update : remplace l'étiquette de l'image (par exemple :v2).",
+        "Express Mode déploie par étapes (déploiement canari par défaut).",
+        "Pour revenir en arrière : remets l'étiquette précédente dans le service."
+      ],
+      "commands": [
+        {
+          "label": "Construire, étiqueter et déposer la version 2",
+          "language": "bash",
+          "code": "docker build --platform linux/amd64 -t [[app_slug]]:v2 .\ndocker tag [[app_slug]]:v2 VOTRE_ID_COMPTE.dkr.ecr.[[region]].amazonaws.com/[[app_slug]]:v2\ndocker push VOTRE_ID_COMPTE.dkr.ecr.[[region]].amazonaws.com/[[app_slug]]:v2"
+        }
+      ],
+      "expect": "Le service passe à la nouvelle version, et ton application se comporte comme prévu.",
+      "warning": "Le retour arrière ne concerne que le code. Il ne défait pas les changements faits dans la base de données.",
+      "optional": true,
+      "help": {
+        "common_cause": "Le service ne trouve pas l'image : l'étiquette est mal écrite, ou l'image n'a pas été déposée dans le même dépôt et la même région.",
+        "doc_url": "https://aws.amazon.com/blogs/containers/extending-amazon-ecs-express-mode-to-build-an-optimal-container-environment/",
+        "doc_label": "Blog AWS : aller plus loin avec ECS Express Mode",
+        "search_query": "ECS Express Mode mettre à jour l'image du service"
+      }
+    },
+    {
+      "id": "sauvegardes-base",
+      "title": "Vérifier les sauvegardes de la base",
+      "where": "console",
+      "only_if": "database",
+      "why": "Si tu fais une erreur ou si quelque chose casse, c'est ta façon de récupérer tes données.",
+      "checklist": [
+        "Console RDS, ta base, onglet Maintenance & backups : vérifie que les sauvegardes automatiques sont activées et note la durée de conservation.",
+        "RDS permet de restaurer la base à un instant précis dans cette période, vers une nouvelle base. Tu peux aussi créer un instantané manuel avant une opération risquée.",
+        "Le stockage des sauvegardes automatiques est gratuit jusqu'à la taille de la base ; au-delà, il est facturé."
+      ],
+      "commands": [],
+      "expect": "Les sauvegardes automatiques sont actives, avec une période de conservation affichée.",
+      "warning": "Une restauration crée une nouvelle base : il faut ensuite pointer ton application vers elle.",
+      "optional": false,
+      "help": {
+        "common_cause": "Les sauvegardes sont désactivées : la durée de conservation est à zéro. Modifie la base pour la régler à une valeur supérieure à zéro.",
+        "doc_url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_GettingStarted.CreatingConnecting.PostgreSQL.html",
+        "doc_label": "Documentation AWS : bases PostgreSQL RDS",
+        "search_query": "AWS RDS sauvegardes automatiques restaurer à un instant précis"
+      }
+    },
+    {
+      "id": "couts",
+      "title": "Surveiller tes coûts",
+      "where": "console",
+      "why": "Un conteneur actif, un équilibreur de charge et une base coûtent tant qu'ils existent, même si personne ne visite ton application.",
+      "checklist": [
+        "Estimation de référence : [[monthly_total]] $ US par mois, hors taxes, région [[region]] (Fargate [[fargate_cost]] $, équilibreur de charge [[alb_cost]] $, base de données [[db_cost]] $, réseau [[network_cost]] $, fichiers [[files_cost]] $).",
+        "L'équilibreur de charge créé par Express Mode peut être partagé entre plusieurs de tes services Express, ce qui en répartit le coût.",
+        "Le moteur suppose que les 100 premiers Go de trafic sortant par mois sont gratuits, partagés entre tous tes services AWS.",
+        "Dans la console : Billing and Cost Management, puis Bills, pour voir ce qui coûte.",
+        "Mets un rappel mensuel dans ton calendrier pour vérifier ta facture."
+      ],
+      "commands": [],
+      "expect": "Tu sais combien tu paies par mois et quand tu le vérifies.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Une facture plus élevée que prévu vient souvent d'un nombre de tâches supérieur à l'estimation, de ressources oubliées, ou du trafic sortant.",
+        "doc_url": "https://docs.aws.amazon.com/cost-management/latest/userguide/create-cost-budget.html",
+        "doc_label": "Documentation AWS : budgets de coûts",
+        "search_query": "AWS comprendre sa facture Fargate load balancer RDS"
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "id": "suppr-donnees",
+      "title": "Garder une copie de ta base (si tu veux la conserver)",
+      "where": "console",
+      "only_if": "database",
+      "why": "Quand la base sera supprimée, tout ce qu'elle contient disparaîtra.",
+      "checklist": [
+        "Ta base n'est pas accessible depuis Internet : le plus simple est un instantané. Console RDS, ta base, Actions, Take snapshot.",
+        "Un instantané se restaure vers une nouvelle base. Il est facturé selon l'espace utilisé : supprime-le quand tu n'en as plus besoin.",
+        "Pour obtenir un fichier SQL, cherche comment exporter une base RDS PostgreSQL depuis une instance EC2."
+      ],
+      "commands": [],
+      "expect": "Un instantané apparaît dans la liste Snapshots de la console RDS, à l'état Available.",
+      "warning": null,
+      "optional": true,
+      "help": {
+        "common_cause": "L'instantané reste en attente : la base est en cours de modification. Attends qu'elle soit à l'état Available.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "AWS RDS créer un instantané manuel"
+      }
+    },
+    {
+      "id": "suppr-service",
+      "title": "Supprimer le service Express",
+      "where": "console",
+      "why": "Tant que le service existe, ses tâches et son équilibreur de charge sont facturés.",
+      "checklist": [
+        "Console ECS, Express mode, ton service, puis Delete.",
+        "Attends que la suppression se termine."
+      ],
+      "commands": [],
+      "expect": "Le service disparaît de la liste.",
+      "warning": "Vérifie ensuite que l'équilibreur de charge a disparu : il peut être partagé avec d'autres services Express.",
+      "optional": false,
+      "help": {
+        "common_cause": "La suppression est bloquée par une ressource liée : lis le message affiché et supprime d'abord ce qu'il indique.",
+        "doc_url": "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-overview.html",
+        "doc_label": "Documentation AWS : ECS Express Mode",
+        "search_query": "ECS Express Mode supprimer un service load balancer"
+      }
+    },
+    {
+      "id": "suppr-base",
+      "title": "Supprimer la base de données",
+      "where": "console",
+      "only_if": "database",
+      "why": "Tant que la base existe, elle est facturée.",
+      "checklist": [
+        "Console RDS, Databases, ta base, puis Actions, Delete.",
+        "AWS propose de créer un instantané final et de conserver les sauvegardes automatiques. Si tu as déjà un instantané ou si tu n'as pas besoin des données, décoche ces deux options pour ne plus rien payer.",
+        "Confirme en tapant le texte demandé."
+      ],
+      "commands": [],
+      "expect": "La base passe à l'état Deleting, puis disparaît de la liste.",
+      "warning": "Définitif si tu ne gardes pas d'instantané : les données sont perdues.",
+      "optional": false,
+      "help": {
+        "common_cause": "La suppression est bloquée : la protection contre la suppression est activée. Modifie la base pour la désactiver.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "AWS RDS supprimer une base de données instantané final"
+      }
+    },
+    {
+      "id": "suppr-image",
+      "title": "Supprimer le dépôt d'images",
+      "where": "local",
+      "why": "Les images stockées dans ECR sont facturées selon leur taille.",
+      "checklist": [],
+      "commands": [
+        {
+          "label": "Supprimer le dépôt et toutes ses images",
+          "language": "bash",
+          "code": "aws ecr delete-repository --repository-name [[app_slug]] --region [[region]] --force"
+        }
+      ],
+      "expect": "La commande affiche les informations du dépôt supprimé, sans erreur.",
+      "warning": "Définitif : toutes les images du dépôt sont perdues.",
+      "optional": false,
+      "help": {
+        "common_cause": "RepositoryNotFoundException : le nom ou la région ne correspond pas à ceux utilisés à la création.",
+        "doc_url": "https://docs.aws.amazon.com/AmazonECR/latest/userguide/getting-started-console.html",
+        "doc_label": "Documentation AWS : Amazon ECR",
+        "search_query": "aws ecr delete-repository force supprimer"
+      }
+    },
+    {
+      "id": "suppr-iam",
+      "title": "Supprimer l'accès de la ligne de commande",
+      "where": "console",
+      "why": "Une clé d'accès qui traîne est un risque de sécurité, même si tu ne l'utilises plus.",
+      "checklist": [
+        "Console IAM, Users, ton utilisateur [[app_slug]]-cli : Security credentials, désactive puis supprime la clé d'accès.",
+        "Supprime ensuite l'utilisateur.",
+        "Efface les clés de ton ordinateur si tu n'en as plus besoin (le fichier credentials du dossier .aws)."
+      ],
+      "commands": [],
+      "expect": "L'utilisateur n'apparaît plus dans la liste IAM Users.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "La suppression de l'utilisateur est refusée : supprime d'abord ses clés d'accès et ses politiques.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "AWS IAM supprimer un utilisateur et ses clés d'accès"
+      }
+    },
+    {
+      "id": "suppr-verif",
+      "title": "Vérifier qu'il ne reste rien de facturé",
+      "where": "console",
+      "why": "Certaines ressources existent séparément du service et continuent d'être facturées.",
+      "checklist": [
+        "ECS : aucun service ni cluster inutile.",
+        "EC2 : Load Balancers et Target Groups créés par Express Mode, Elastic IPs et Volumes.",
+        "RDS : Databases, Snapshots et Automated backups.",
+        "CloudWatch : Log groups créés pour ton service (leur coût est faible, mais supprime-les si tu veux faire le ménage).",
+        "Billing and Cost Management, Bills : vérifie les jours suivants que la dépense n'augmente plus."
+      ],
+      "commands": [],
+      "expect": "Aucune ressource facturable ne reste dans ton compte.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Une dépense continue après la suppression : un équilibreur de charge, une adresse IP ou un instantané reste dans la région.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "AWS vérifier les ressources facturées après suppression"
+      }
+    }
+  ],
+  "limits": [
+    "Express Mode crée un équilibreur de charge, facturé en continu même sans visiteur.",
+    "La base est en Single-AZ, sans réplique : une panne de la zone coupe la base. La haute disponibilité n'est pas incluse dans l'estimation.",
+    "Le mot de passe de la base est passé en variable d'environnement : un projet durable utilise AWS Secrets Manager.",
+    "L'utilisateur IAM de ce guide a des droits d'administration pour rester simple : un projet durable utilise des droits restreints.",
+    "L'application utilise l'utilisateur administrateur de la base pour rester simple.",
+    "Il suppose une application qui s'exécute dans un conteneur et sert des requêtes HTTP.",
+    "Les prix sont des références pour la région us-east-1 (octobre 2026) et changent d'une région à l'autre.",
+    "Les étapes de la console dépendent de l'interface d'AWS, qui peut évoluer."
+  ],
+  "sources": [
+    {"label": "AWS : ECS Express Mode", "url": "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-overview.html"},
+    {"label": "AWS : aller plus loin avec ECS Express Mode", "url": "https://aws.amazon.com/blogs/containers/extending-amazon-ecs-express-mode-to-build-an-optimal-container-environment/"},
+    {"label": "AWS : déposer une image dans ECR", "url": "https://docs.aws.amazon.com/AmazonECR/latest/userguide/getting-started-console.html"},
+    {"label": "AWS : créer une base PostgreSQL RDS", "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_GettingStarted.CreatingConnecting.PostgreSQL.html"},
+    {"label": "AWS : créer un budget de coûts", "url": "https://docs.aws.amazon.com/cost-management/latest/userguide/create-cost-budget.html"}
+  ],
+  "written_from_docs_on": "2026-10-31",
+  "tested_on": null
+}

@@ -1,0 +1,603 @@
+{
+  "arch_id": "azure_vm_postgres",
+  "title": "Déployer ton application sur Azure avec une machine virtuelle et PostgreSQL",
+  "intro": "Ce guide te mène de zéro à ton application en ligne sur une machine virtuelle Azure ([[vm_size]]), avec une base PostgreSQL gérée par Azure. Tout se pilote depuis ton terminal avec l'outil az. Suis les étapes dans l'ordre : chacune explique à quoi elle sert et comment vérifier qu'elle a fonctionné.",
+  "prerequisites": [
+    "Une application qui démarre avec Docker Compose (un fichier docker-compose.yml) et dont le code est dans un dépôt Git.",
+    "Un terminal sur ton ordinateur (PowerShell sous Windows, Terminal sous macOS ou Linux) avec la commande ssh.",
+    "Un compte Microsoft et une carte bancaire pour ton abonnement Azure.",
+    "Un nom de domaine (facultatif, nécessaire pour avoir HTTPS)."
+  ],
+  "steps": [
+    {
+      "id": "compte",
+      "title": "Créer ton compte Azure et vérifier ton abonnement",
+      "where": "console",
+      "why": "L'abonnement Azure est le compteur de facturation : tout ce que tu crées s'y rattache. La région [[region]] est celle des prix de ce guide.",
+      "checklist": [
+        "Crée un compte sur azure.microsoft.com et connecte-toi au portail Azure (portal.azure.com).",
+        "Dans le portail, cherche Subscriptions et vérifie que tu as un abonnement actif. Une carte bancaire est demandée."
+      ],
+      "commands": [],
+      "expect": "Le portail Azure affiche un abonnement à l'état actif.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Aucun abonnement n'apparaît : la création du compte n'est pas terminée (vérification de la carte ou du téléphone). Termine les étapes demandées par le portail.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "créer un compte Azure et un abonnement"
+      }
+    },
+    {
+      "id": "budget",
+      "title": "Créer un budget et des alertes (avant toute ressource)",
+      "where": "console",
+      "why": "Azure facture à l'usage. Une alerte te prévient avant qu'une mauvaise surprise s'installe.",
+      "checklist": [
+        "Dans le portail : Cost Management + Billing, puis Budgets, puis Add.",
+        "Portée : ton abonnement.",
+        "Montant mensuel : un peu au-dessus de l'estimation ([[monthly_total]] $ US par mois, hors taxes).",
+        "Alertes à 50 %, 80 % et 100 % du montant, avec ton adresse e-mail comme destinataire.",
+        "Ajoute azure-noreply@microsoft.com à tes expéditeurs autorisés pour que les alertes n'arrivent pas dans tes courriels indésirables."
+      ],
+      "commands": [],
+      "expect": "Le budget apparaît dans la liste Budgets, avec ses alertes.",
+      "warning": "Un budget envoie des alertes mais ne bloque pas les dépenses : si tu reçois une alerte, agis tout de suite.",
+      "optional": false,
+      "help": {
+        "common_cause": "Tu n'as pas le droit de créer un budget : il faut le rôle Contributeur sur l'abonnement.",
+        "doc_url": "https://learn.microsoft.com/azure/cost-management-billing/costs/tutorial-acm-create-budgets",
+        "doc_label": "Documentation Microsoft : créer et gérer des budgets",
+        "search_query": "Azure Cost Management créer un budget et des alertes"
+      }
+    },
+    {
+      "id": "cli",
+      "title": "Installer l'outil az et te connecter",
+      "where": "local",
+      "why": "az est l'outil en ligne de commande d'Azure : tu pilotes tout depuis ton terminal.",
+      "checklist": [
+        "Installe Azure CLI en suivant la documentation officielle pour ton système, puis ouvre un nouveau terminal.",
+        "az login ouvre ton navigateur pour te connecter avec ton compte Microsoft."
+      ],
+      "commands": [
+        {
+          "label": "Vérifier l'installation",
+          "language": "bash",
+          "code": "az --version"
+        },
+        {
+          "label": "Te connecter",
+          "language": "bash",
+          "code": "az login"
+        },
+        {
+          "label": "Vérifier l'abonnement utilisé",
+          "language": "bash",
+          "code": "az account show --query name --output tsv"
+        }
+      ],
+      "expect": "La dernière commande affiche le nom de ton abonnement.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "La commande az n'est pas reconnue : ferme puis rouvre le terminal après l'installation.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "installer Azure CLI Windows az login tutoriel"
+      }
+    },
+    {
+      "id": "groupe",
+      "title": "Créer un groupe de ressources",
+      "where": "local",
+      "why": "Un groupe de ressources est un dossier qui contient tout ce que tu crées pour ce projet. Le supprimer à la fin supprime tout d'un coup.",
+      "checklist": [],
+      "commands": [
+        {
+          "label": "Créer le groupe",
+          "language": "bash",
+          "code": "az group create --name [[resource_group]] --location [[region]]"
+        }
+      ],
+      "expect": "La commande affiche un résultat avec provisioningState: Succeeded.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Une erreur indique que l'abonnement n'est pas enregistré ou n'a pas les droits : vérifie que tu es connecté au bon abonnement avec az account show.",
+        "doc_url": "https://learn.microsoft.com/azure/virtual-machines/linux/quick-create-cli",
+        "doc_label": "Documentation Microsoft : créer une machine virtuelle Linux",
+        "search_query": "az group create groupe de ressources Azure"
+      }
+    },
+    {
+      "id": "vm",
+      "title": "Créer la machine virtuelle",
+      "where": "local",
+      "why": "C'est le serveur qui fera tourner ton application. L'option de clé SSH crée ta clé d'accès si tu n'en as pas déjà une.",
+      "checklist": [
+        "Taille choisie : [[vm_size]] ([[vm_vcpu]] vCPU, [[vm_ram_gb]] Gio de RAM).",
+        "La création prend quelques minutes."
+      ],
+      "commands": [
+        {
+          "label": "Créer la machine (une seule ligne)",
+          "language": "bash",
+          "code": "az vm create --resource-group [[resource_group]] --name [[app_slug]] --image Ubuntu2204 --size [[vm_size]] --admin-username azureuser --generate-ssh-keys --public-ip-sku Standard"
+        },
+        {
+          "label": "Afficher l'adresse IP publique de la machine",
+          "language": "bash",
+          "code": "az vm show --show-details --resource-group [[resource_group]] --name [[app_slug]] --query publicIps --output tsv"
+        }
+      ],
+      "expect": "La première commande affiche un résultat JSON qui contient publicIpAddress. La seconde affiche l'adresse seule : note-la, elle s'appelle VOTRE_IP_SERVEUR dans les étapes suivantes.",
+      "warning": "Le disque système créé par cette commande n'est pas celui de l'estimation (disque Premium SSD v2 de 64 Gio) : son coût réel peut différer de quelques dollars. L'adresse IP publique est facturée tant que la machine existe.",
+      "optional": false,
+      "help": {
+        "common_cause": "La taille demandée n'est pas disponible dans cette région ou pour ton abonnement : choisis une taille proche, ou une autre région.",
+        "doc_url": "https://learn.microsoft.com/azure/virtual-machines/linux/quick-create-cli",
+        "doc_label": "Documentation Microsoft : créer une machine virtuelle Linux",
+        "search_query": "az vm create Ubuntu tutoriel débutant"
+      }
+    },
+    {
+      "id": "ports",
+      "title": "Ouvrir les ports web",
+      "where": "local",
+      "why": "Par défaut, seul le port SSH est ouvert. Il faut ouvrir les ports 80 (HTTP) et 443 (HTTPS) pour que tes visiteurs atteignent l'application.",
+      "checklist": [],
+      "commands": [
+        {
+          "label": "Ouvrir les ports 80 et 443",
+          "language": "bash",
+          "code": "az vm open-port --resource-group [[resource_group]] --name [[app_slug]] --port 80 --priority 900\naz vm open-port --resource-group [[resource_group]] --name [[app_slug]] --port 443 --priority 901"
+        }
+      ],
+      "expect": "Chaque commande se termine sans erreur et affiche la configuration du groupe de sécurité réseau.",
+      "warning": "Le port SSH reste ouvert à tout Internet : pour un projet durable, restreins-le à ton adresse IP dans le groupe de sécurité réseau.",
+      "optional": false,
+      "help": {
+        "common_cause": "La deuxième commande échoue parce que la priorité existe déjà : donne à chaque règle une priorité différente (901, 902...).",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "az vm open-port ouvrir le port 80 et 443 Azure"
+      }
+    },
+    {
+      "id": "connexion",
+      "title": "Te connecter à la machine",
+      "where": "local",
+      "why": "À partir de maintenant, tu pilotes le serveur depuis ton terminal, comme si tu étais devant lui.",
+      "checklist": [],
+      "commands": [
+        {
+          "label": "Connexion SSH (remplace VOTRE_IP_SERVEUR)",
+          "language": "bash",
+          "code": "ssh azureuser@VOTRE_IP_SERVEUR"
+        }
+      ],
+      "expect": "Au premier essai, le terminal demande de confirmer l'empreinte du serveur : écris yes. Tu vois ensuite une invite qui commence par azureuser@.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Permission denied (publickey) : la clé créée par az vm create n'est pas dans ton dossier .ssh habituel, ou tu utilises un autre ordinateur que celui de la création. Timeout : la machine démarre encore, ou le port 22 est bloqué.",
+        "doc_url": "https://learn.microsoft.com/azure/virtual-machines/linux/quick-create-cli",
+        "doc_label": "Documentation Microsoft : se connecter à la machine",
+        "search_query": "Azure VM ssh permission denied publickey"
+      }
+    },
+    {
+      "id": "docker",
+      "title": "Installer Docker sur la machine",
+      "where": "server",
+      "why": "Docker fait tourner ton application dans un conteneur, de la même façon sur ton ordinateur et sur le serveur.",
+      "checklist": [
+        "Après la troisième commande, déconnecte-toi (exit) puis reconnecte-toi avec la commande SSH de l'étape précédente : ton utilisateur reçoit ainsi le groupe docker."
+      ],
+      "commands": [
+        {
+          "label": "Mettre le système à jour",
+          "language": "bash",
+          "code": "sudo apt update && sudo apt upgrade -y"
+        },
+        {
+          "label": "Installer Docker avec le script officiel",
+          "language": "bash",
+          "code": "curl -fsSL https://get.docker.com -o get-docker.sh\nsudo sh get-docker.sh"
+        },
+        {
+          "label": "Autoriser ton utilisateur à utiliser Docker",
+          "language": "bash",
+          "code": "sudo usermod -aG docker $USER"
+        },
+        {
+          "label": "Après t'être reconnecté, vérifier l'installation",
+          "language": "bash",
+          "code": "docker --version\ndocker compose version"
+        }
+      ],
+      "expect": "Les deux commandes de vérification affichent un numéro de version, sans avoir besoin de sudo.",
+      "warning": "Ce script est pratique pour démarrer. Pour un serveur critique, préfère l'installation par dépôt apt décrite dans la documentation de Docker.",
+      "optional": false,
+      "help": {
+        "common_cause": "permission denied en lançant docker : tu ne t'es pas reconnecté après la commande usermod. Fais exit, puis reconnecte-toi.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "installer Docker sur Ubuntu avec le script get.docker.com"
+      }
+    },
+    {
+      "id": "base",
+      "title": "Créer la base de données PostgreSQL",
+      "where": "local",
+      "only_if": "database",
+      "why": "Azure Database for PostgreSQL est une base gérée par Microsoft : installation, mises à jour et sauvegardes sont prises en charge pour toi. La base n'accepte aucune connexion extérieure : tu ouvres seulement l'adresse de ta machine.",
+      "checklist": [
+        "Ces commandes se lancent sur ton ordinateur, pas sur le serveur.",
+        "La taille ([[pg_sku]] : [[pg_vcpu]] vCPU, [[pg_ram_gb]] Gio de RAM, [[pg_storage_gb]] Go de stockage) vient de l'estimation. Azure arrondit le stockage à une taille standard.",
+        "Remplace VOTRE_MOT_DE_PASSE_ADMIN par un mot de passe solide : il doit faire au moins 8 caractères et mélanger majuscules, minuscules, chiffres ou symboles. Note-le.",
+        "Le nom du serveur doit être unique dans tout Azure : s'il est refusé, ajoute quelques chiffres à [[pg_server_name]].",
+        "La création prend plusieurs minutes."
+      ],
+      "commands": [
+        {
+          "label": "Créer le serveur et la base appdb (une seule ligne)",
+          "language": "bash",
+          "code": "az postgres flexible-server create --resource-group [[resource_group]] --name [[pg_server_name]] --location [[region]] --admin-user pgadmin --admin-password VOTRE_MOT_DE_PASSE_ADMIN --sku-name [[pg_sku]] --tier Burstable --storage-size [[pg_storage_gb]] --version 16 --database-name appdb --public-access None"
+        },
+        {
+          "label": "Autoriser l'adresse de ta machine (remplace VOTRE_IP_SERVEUR)",
+          "language": "bash",
+          "code": "az postgres flexible-server firewall-rule create --resource-group [[resource_group]] --name [[pg_server_name]] --rule-name allow-vm --start-ip-address VOTRE_IP_SERVEUR --end-ip-address VOTRE_IP_SERVEUR"
+        },
+        {
+          "label": "Afficher l'adresse de la base",
+          "language": "bash",
+          "code": "az postgres flexible-server show --resource-group [[resource_group]] --name [[pg_server_name]] --query fullyQualifiedDomainName --output tsv"
+        }
+      ],
+      "expect": "La dernière commande affiche une adresse qui se termine par postgres.database.azure.com : note-la, elle s'appelle VOTRE_ADRESSE_BASE dans la suite.",
+      "warning": "La base est facturée tant qu'elle existe, même sans visiteur. N'utilise pas l'adresse 0.0.0.0 comme règle de pare-feu : elle ouvre la base trop largement. Azure exige une connexion chiffrée : ton application doit utiliser sslmode=require.",
+      "optional": false,
+      "help": {
+        "common_cause": "Le nom du serveur est refusé (déjà utilisé) ou la région n'a plus de capacité pour cette taille : change le nom ou essaie une autre région, par exemple eastus2.",
+        "doc_url": "https://learn.microsoft.com/azure/postgresql/flexible-server/quickstart-create-server-cli",
+        "doc_label": "Documentation Microsoft : créer un serveur PostgreSQL avec la CLI",
+        "search_query": "az postgres flexible-server create tutoriel pare-feu"
+      }
+    },
+    {
+      "id": "code",
+      "title": "Récupérer ton application sur le serveur",
+      "where": "server",
+      "why": "Ton code arrive sur le serveur depuis ton dépôt Git.",
+      "checklist": [],
+      "commands": [
+        {
+          "label": "Cloner le dépôt (remplace l'adresse par la tienne)",
+          "language": "bash",
+          "code": "git clone https://github.com/VOTRE_COMPTE/VOTRE_DEPOT.git\ncd VOTRE_DEPOT\nls"
+        }
+      ],
+      "expect": "La commande ls affiche les fichiers de ton projet, dont docker-compose.yml.",
+      "warning": "Si ton dépôt est privé, GitHub n'accepte pas ton mot de passe : utilise un jeton d'accès personnel ou une clé de déploiement (cherche la documentation de GitHub).",
+      "optional": false,
+      "help": {
+        "common_cause": "Repository not found : l'adresse est incorrecte, ou le dépôt est privé et le serveur n'a pas les droits.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "git clone dépôt privé GitHub jeton d'accès personnel"
+      }
+    },
+    {
+      "id": "secrets",
+      "title": "Configurer les mots de passe et les clés de ton application",
+      "where": "server",
+      "why": "Tes secrets restent dans un fichier .env sur le serveur : ils ne doivent jamais se retrouver dans ton dépôt Git.",
+      "checklist": [
+        "Remplace chaque valeur d'exemple par une vraie valeur.",
+        "Si ton projet a une base de données : DB_HOST = VOTRE_ADRESSE_BASE, DB_PORT = 5432, DB_NAME = appdb, DB_USER = pgadmin, DB_PASSWORD = le mot de passe choisi à la création du serveur, et la connexion chiffrée (sslmode=require) activée dans ton application (adapte les noms à ton application).",
+        "Enregistre avec Ctrl+O puis Entrée, et quitte avec Ctrl+X."
+      ],
+      "commands": [
+        {
+          "label": "Créer le fichier de configuration à partir de l'exemple",
+          "language": "bash",
+          "code": "cp .env.example .env"
+        },
+        {
+          "label": "Générer un mot de passe solide pour tes autres secrets",
+          "language": "bash",
+          "code": "openssl rand -base64 32"
+        },
+        {
+          "label": "Modifier le fichier",
+          "language": "bash",
+          "code": "nano .env"
+        }
+      ],
+      "expect": "Le fichier .env contient tes vraies valeurs, sans aucune valeur d'exemple.",
+      "warning": "Ne mets jamais le fichier .env dans ton dépôt Git : il doit figurer dans ton .gitignore. Pour rester simple, l'application utilise ici l'utilisateur administrateur de la base : un projet durable crée un utilisateur dédié.",
+      "optional": false,
+      "help": {
+        "common_cause": "cp : fichier introuvable. Ton projet n'a pas de .env.example : crée un fichier .env à la main avec les variables dont ton application a besoin.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "docker compose fichier .env variables d'environnement"
+      }
+    },
+    {
+      "id": "demarrage",
+      "title": "Démarrer l'application",
+      "where": "server",
+      "why": "Docker Compose construit et lance tous les services de ton application d'un seul coup.",
+      "checklist": [
+        "Dans ton docker-compose.yml, publie le port de ton application sur le port 80 (par exemple 80:8000 si elle écoute sur le port 8000)."
+      ],
+      "commands": [
+        {
+          "label": "Construire et démarrer en arrière-plan",
+          "language": "bash",
+          "code": "docker compose up -d --build"
+        },
+        {
+          "label": "Vérifier l'état des services",
+          "language": "bash",
+          "code": "docker compose ps"
+        },
+        {
+          "label": "Lire les derniers messages de l'application",
+          "language": "bash",
+          "code": "docker compose logs --tail 50"
+        }
+      ],
+      "expect": "Tous les services sont à l'état running (ou Up) et les messages ne montrent aucune erreur.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "L'application n'arrive pas à se connecter à la base : l'adresse ou le mot de passe du fichier .env est incorrect, la connexion chiffrée n'est pas activée, ou la règle de pare-feu de la base ne contient pas l'adresse de ta machine.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "docker compose up erreur démarrage conteneur"
+      }
+    },
+    {
+      "id": "verification",
+      "title": "Vérifier que l'application répond",
+      "where": "local",
+      "why": "Il faut tester depuis l'extérieur, comme le ferait un utilisateur.",
+      "checklist": [
+        "Ouvre http://VOTRE_IP_SERVEUR dans ton navigateur.",
+        "Teste une action complète de ton application (connexion, création d'un élément)."
+      ],
+      "commands": [],
+      "expect": "Ton application s'affiche et les données sont bien enregistrées par la base.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "La page ne se charge pas : vérifie que le port 80 est ouvert (étape des ports), que le port est publié dans docker-compose.yml, et lis les messages de l'étape précédente.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "Azure VM ouvrir le port 80 groupe de sécurité réseau"
+      }
+    },
+    {
+      "id": "https",
+      "title": "Ajouter un nom de domaine et HTTPS",
+      "where": "server",
+      "why": "HTTPS chiffre les échanges. Il est indispensable si ton application gère des comptes ou des données personnelles. Caddy obtient et renouvelle le certificat tout seul.",
+      "checklist": [
+        "Chez ton registraire de domaine, crée un enregistrement DNS de type A qui pointe VOTRE_DOMAINE vers VOTRE_IP_SERVEUR.",
+        "Dans docker-compose.yml, supprime la ligne qui publie ton application sur le port 80 et ajoute le service caddy ci-dessous.",
+        "Crée le fichier Caddyfile à côté de docker-compose.yml, avec le nom de ton service et son port à la place de NOM_DU_SERVICE et PORT."
+      ],
+      "commands": [
+        {
+          "label": "À ajouter dans la section services de docker-compose.yml",
+          "language": "yaml",
+          "code": "  caddy:\n    image: caddy:2\n    restart: unless-stopped\n    ports:\n      - \"80:80\"\n      - \"443:443\"\n    volumes:\n      - ./Caddyfile:/etc/caddy/Caddyfile\n      - caddy_data:/data\n      - caddy_config:/config"
+        },
+        {
+          "label": "À ajouter dans la section volumes de docker-compose.yml",
+          "language": "yaml",
+          "code": "volumes:\n  caddy_data:\n  caddy_config:"
+        },
+        {
+          "label": "Contenu du fichier Caddyfile",
+          "language": "text",
+          "code": "VOTRE_DOMAINE {\n    reverse_proxy NOM_DU_SERVICE:PORT\n}"
+        },
+        {
+          "label": "Redémarrer",
+          "language": "bash",
+          "code": "docker compose up -d"
+        }
+      ],
+      "expect": "https://VOTRE_DOMAINE affiche ton application avec un cadenas.",
+      "warning": "Si ton fichier docker-compose.yml a déjà une section volumes, ajoute seulement les deux lignes caddy_data et caddy_config dedans. Respecte l'indentation.",
+      "optional": true,
+      "help": {
+        "common_cause": "Le certificat n'est pas émis : l'enregistrement DNS n'est pas encore propagé (attends un peu et réessaie), ou les ports 80 et 443 sont fermés.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "Caddy reverse proxy docker compose HTTPS automatique"
+      }
+    },
+    {
+      "id": "sauvegardes-base",
+      "title": "Vérifier les sauvegardes de la base",
+      "where": "console",
+      "only_if": "database",
+      "why": "Si tu fais une erreur ou si quelque chose casse, c'est ta façon de récupérer tes données.",
+      "checklist": [
+        "Portail Azure : ton serveur PostgreSQL, puis Backup and restore. Vérifie que les sauvegardes automatiques sont actives et note la durée de conservation.",
+        "Azure permet de restaurer la base à un instant précis, vers un nouveau serveur.",
+        "Le stockage de sauvegarde au-delà du quota inclus est facturé, et il n'est pas compris dans l'estimation."
+      ],
+      "commands": [],
+      "expect": "La page Backup and restore affiche la période de conservation et les points de restauration disponibles.",
+      "warning": "Une restauration crée un nouveau serveur : il faut ensuite pointer ton application vers lui.",
+      "optional": false,
+      "help": {
+        "common_cause": "Aucun point de restauration n'apparaît : le serveur vient d'être créé, la première sauvegarde n'a pas encore eu lieu.",
+        "doc_url": "https://learn.microsoft.com/azure/postgresql/flexible-server/quickstart-create-server-cli",
+        "doc_label": "Documentation Microsoft : serveurs PostgreSQL",
+        "search_query": "Azure Database for PostgreSQL sauvegardes restauration à un instant précis"
+      }
+    },
+    {
+      "id": "sauvegardes-disque",
+      "title": "Penser au disque de la machine",
+      "where": "console",
+      "why": "Le disque de ta machine virtuelle n'est pas sauvegardé automatiquement. Si tu y stockes des données (fichiers envoyés, par exemple), une panne les fait perdre.",
+      "checklist": [
+        "Si ton application stocke des fichiers sur le disque, active Azure Backup sur la machine : portail, ta machine, Backup. Il facture l'instance protégée et le stockage des sauvegardes, hors de l'estimation.",
+        "Pour un stockage durable de fichiers, préfère Azure Blob Storage à un disque de machine."
+      ],
+      "commands": [],
+      "expect": "Tu sais où vivent tes données et ce qui les protège.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Tu ne trouves pas l'option Backup : elle est dans le menu de gauche de la page de ta machine virtuelle, section Operations.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "Azure Backup machine virtuelle activer la sauvegarde"
+      }
+    },
+    {
+      "id": "couts",
+      "title": "Surveiller tes coûts",
+      "where": "console",
+      "why": "Une machine et une base coûtent tant qu'elles existent, même si personne ne visite ton application.",
+      "checklist": [
+        "Estimation de référence : [[monthly_total]] $ US par mois, hors taxes, région [[region]] (machine, disque et adresse IP [[vm_cost]] $, base de données [[db_cost]] $, fichiers [[files_cost]] $, trafic sortant [[network_cost]] $).",
+        "Les prix de la base PostgreSQL de cette estimation sont à vérifier : confirme-les dans le calculateur de prix d'Azure.",
+        "L'estimation compte un disque système de 64 Gio de type Premium SSD v2, qui n'est pas celui créé par az vm create : le coût réel du disque peut différer de quelques dollars.",
+        "Le moteur suppose que les 100 premiers Go de trafic sortant par mois sont gratuits.",
+        "Dans le portail : Cost Management + Billing, puis Cost analysis, pour voir ce qui coûte.",
+        "Mets un rappel mensuel dans ton calendrier pour vérifier ta facture."
+      ],
+      "commands": [],
+      "expect": "Tu sais combien tu paies par mois et quand tu le vérifies.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Une facture plus élevée que prévu vient souvent de ressources oubliées (disques, adresses IP, sauvegardes) ou du trafic sortant.",
+        "doc_url": "https://learn.microsoft.com/azure/cost-management-billing/costs/tutorial-acm-create-budgets",
+        "doc_label": "Documentation Microsoft : budgets et coûts",
+        "search_query": "Azure comprendre sa facture machine virtuelle PostgreSQL"
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "id": "suppr-donnees",
+      "title": "Récupérer tes données (si tu veux les garder)",
+      "where": "server",
+      "only_if": "database",
+      "why": "Quand le groupe de ressources sera supprimé, tout ce que contient la base disparaîtra. Exporte ce que tu veux garder avant.",
+      "checklist": [
+        "Remplace VOTRE_ADRESSE_BASE par l'adresse de ta base. Le mot de passe te sera demandé.",
+        "Les deux premières commandes se lancent sur le serveur, la dernière sur ton ordinateur."
+      ],
+      "commands": [
+        {
+          "label": "Sur le serveur : installer l'outil client PostgreSQL",
+          "language": "bash",
+          "code": "sudo apt install -y postgresql-client"
+        },
+        {
+          "label": "Sur le serveur : exporter la base",
+          "language": "bash",
+          "code": "cd ~\npg_dump \"host=VOTRE_ADRESSE_BASE port=5432 dbname=appdb user=pgadmin sslmode=require\" > sauvegarde.sql"
+        },
+        {
+          "label": "Sur ton ordinateur : télécharger le fichier",
+          "language": "bash",
+          "code": "scp azureuser@VOTRE_IP_SERVEUR:~/sauvegarde.sql ."
+        }
+      ],
+      "expect": "Un fichier sauvegarde.sql non vide est présent sur ton ordinateur.",
+      "warning": null,
+      "optional": true,
+      "help": {
+        "common_cause": "pg_dump refuse la connexion : le mot de passe est faux, ou la règle de pare-feu de la base ne contient pas l'adresse de ta machine.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "pg_dump exporter une base Azure PostgreSQL depuis une VM"
+      }
+    },
+    {
+      "id": "suppr-groupe",
+      "title": "Supprimer le groupe de ressources",
+      "where": "local",
+      "why": "Supprimer le groupe supprime tout ce qu'il contient : machine, disque, adresse IP, base de données. C'est la façon la plus sûre de ne plus rien payer.",
+      "checklist": [
+        "Vérifie d'abord le nom du groupe avec la première commande."
+      ],
+      "commands": [
+        {
+          "label": "Lister tes groupes de ressources",
+          "language": "bash",
+          "code": "az group list --output table"
+        },
+        {
+          "label": "Supprimer le groupe et tout son contenu",
+          "language": "bash",
+          "code": "az group delete --name [[resource_group]] --yes --no-wait"
+        }
+      ],
+      "expect": "La suppression se déroule en arrière-plan. Après quelques minutes, az group list n'affiche plus le groupe.",
+      "warning": "Définitif pour tout ce que contient le groupe. Ne le fais pas si le groupe sert à autre chose.",
+      "optional": false,
+      "help": {
+        "common_cause": "La suppression échoue à cause d'un verrou sur une ressource : retire le verrou dans le portail, puis recommence.",
+        "doc_url": "https://learn.microsoft.com/azure/virtual-machines/linux/quick-create-cli",
+        "doc_label": "Documentation Microsoft : nettoyer les ressources",
+        "search_query": "az group delete supprimer un groupe de ressources"
+      }
+    },
+    {
+      "id": "suppr-verif",
+      "title": "Vérifier qu'il ne reste rien de facturé",
+      "where": "console",
+      "why": "Le budget et certaines ressources créées en dehors du groupe peuvent continuer à exister.",
+      "checklist": [
+        "Portail : Resource groups. Le groupe [[resource_group]] a disparu.",
+        "Cost Management + Billing, Budgets : supprime le budget créé pour ce projet si tu n'en as plus besoin.",
+        "Cost analysis : vérifie les jours suivants que la dépense n'augmente plus."
+      ],
+      "commands": [],
+      "expect": "Aucune ressource facturable ne reste dans ton abonnement.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Une dépense continue après la suppression : une ressource a été créée dans un autre groupe. Regarde la liste All resources du portail.",
+        "doc_url": "https://learn.microsoft.com/azure/cost-management-billing/costs/tutorial-acm-create-budgets",
+        "doc_label": "Documentation Microsoft : budgets et coûts",
+        "search_query": "Azure vérifier les ressources facturées après suppression"
+      }
+    }
+  ],
+  "limits": [
+    "Ce guide met l'application sur une seule machine : une panne de la machine arrête l'application jusqu'à son remplacement.",
+    "La base n'a pas de haute disponibilité : une panne de zone coupe la base. L'option n'est pas comprise dans l'estimation.",
+    "Le disque système créé par az vm create n'est pas celui de l'estimation : le coût réel du disque peut différer.",
+    "Les prix de la base PostgreSQL de l'estimation sont à vérifier.",
+    "Le port SSH reste ouvert à tout Internet : un projet durable le restreint à ton adresse IP.",
+    "L'application utilise l'utilisateur administrateur de la base pour rester simple.",
+    "Il suppose une application qui démarre avec Docker Compose.",
+    "Les prix sont des références pour la région eastus (octobre 2026) et changent d'une région à l'autre.",
+    "Les étapes dépendent des outils et du portail d'Azure, qui peuvent évoluer."
+  ],
+  "sources": [
+    {"label": "Microsoft : créer une machine virtuelle Linux avec la CLI", "url": "https://learn.microsoft.com/azure/virtual-machines/linux/quick-create-cli"},
+    {"label": "Microsoft : créer un serveur PostgreSQL avec la CLI", "url": "https://learn.microsoft.com/azure/postgresql/flexible-server/quickstart-create-server-cli"},
+    {"label": "Microsoft : créer et gérer des budgets", "url": "https://learn.microsoft.com/azure/cost-management-billing/costs/tutorial-acm-create-budgets"}
+  ],
+  "written_from_docs_on": "2026-10-31",
+  "tested_on": null
+}

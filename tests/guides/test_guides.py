@@ -112,14 +112,6 @@ def test_slugify():
     assert slugify(None) == "mon-application"
     assert slugify("???") == "mon-application"
 
-
-def test_architecture_without_guide_returns_fallback():
-    response = build_guide("aws_ec2_rds", ProjectSpec())
-    assert not response.available
-    assert response.guide is None
-    assert response.fallback.youtube_url.startswith("https://www.youtube.com/results")
-
-
 def test_available_endpoint_lists_guides():
     response = client.get("/api/guides/available")
     assert response.status_code == 200
@@ -137,12 +129,25 @@ def test_guide_endpoint_returns_a_rendered_guide():
     assert body["guide"]["parameters"]["app_slug"] == "salon-elegance"
     assert len(body["guide"]["steps"]) >= 10
 
-
-def test_guide_endpoint_fallback_for_missing_guide():
-    response = client.post("/api/guides/azure_vm_postgres", json={"spec": {}})
+def test_guide_endpoint_fallback_for_missing_guide(monkeypatch):
+    monkeypatch.setattr("services.guides.service.get_guides", lambda: {})
+    response = client.post("/api/guides/hetzner_vps", json={"spec": {}})
     assert response.status_code == 200
     assert response.json()["available"] is False
 
+def test_architecture_without_guide_returns_fallback(monkeypatch):
+    monkeypatch.setattr("services.guides.service.get_guides", lambda: {})
+    response = build_guide("hetzner_vps", ProjectSpec())
+    assert not response.available
+    assert response.guide is None
+    assert response.fallback.youtube_url.startswith("https://www.youtube.com/results")
+
+
 def test_guide_endpoint_unknown_architecture_is_404():
     assert client.post("/api/guides/inexistante", json={"spec": {}}).status_code == 404
+
+def test_every_architecture_has_a_guide():
+    from services.engine.architectures import get_architectures
+
+    assert set(get_guides()) == {a.id for a in get_architectures()}
 

@@ -1,0 +1,521 @@
+{
+  "arch_id": "aws_ec2_rds",
+  "title": "Déployer ton application sur AWS avec un serveur EC2 et une base RDS",
+  "intro": "Ce guide te mène de zéro à ton application en ligne sur un serveur AWS EC2 ([[ec2_type]]), avec une base PostgreSQL gérée par AWS. Suis les étapes dans l'ordre : chacune explique à quoi elle sert et comment vérifier qu'elle a fonctionné.",
+  "prerequisites": [
+    "Une application qui démarre avec Docker Compose (un fichier docker-compose.yml) et dont le code est dans un dépôt Git.",
+    "Un terminal sur ton ordinateur (PowerShell sous Windows, Terminal sous macOS ou Linux) avec la commande ssh.",
+    "Une carte bancaire pour ton compte AWS.",
+    "Un nom de domaine (facultatif, nécessaire pour avoir HTTPS)."
+  ],
+  "steps": [
+    {
+      "id": "compte",
+      "title": "Créer ton compte AWS et choisir la région",
+      "where": "console",
+      "why": "Ton compte AWS regroupe tout ce que tu crées et la facturation. La région est l'endroit physique où tes ressources s'installent : les prix de ce guide sont ceux de la région [[region]].",
+      "checklist": [
+        "Crée un compte sur aws.amazon.com et connecte-toi à la console.",
+        "Active l'authentification multifacteur (MFA) sur ton compte racine, et évite de l'utiliser au quotidien.",
+        "En haut à droite de la console, choisis la région N. Virginia ([[region]]). Garde la même région pour toutes les étapes."
+      ],
+      "commands": [],
+      "expect": "La console AWS s'affiche avec la région [[region]] sélectionnée.",
+      "warning": "Une région différente affiche des prix différents et ne contient pas tes ressources : vérifie toujours la région en haut à droite.",
+      "optional": false,
+      "help": {
+        "common_cause": "Ton compte n'est pas encore activé : AWS peut mettre un peu de temps à valider un nouveau compte (moyen de paiement, vérification par téléphone).",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "créer un compte AWS et activer le MFA"
+      }
+    },
+    {
+      "id": "budget",
+      "title": "Créer un budget et des alertes (avant toute ressource)",
+      "where": "console",
+      "why": "AWS facture à l'usage. Une alerte te prévient avant qu'une mauvaise surprise s'installe.",
+      "checklist": [
+        "Dans la console : Billing and Cost Management, puis Budgets, puis Create budget.",
+        "Choisis Customize (advanced), puis Cost budget.",
+        "Montant mensuel : un peu au-dessus de l'estimation ([[monthly_total]] $ US par mois, hors taxes).",
+        "Alertes à 50 %, 80 % et 100 % du montant, avec ton adresse e-mail comme destinataire."
+      ],
+      "commands": [],
+      "expect": "Le budget apparaît dans la liste Budgets, avec ses alertes.",
+      "warning": "Un budget envoie des alertes mais ne bloque pas les dépenses : si tu reçois une alerte, agis tout de suite.",
+      "optional": false,
+      "help": {
+        "common_cause": "Une alerte sans destinataire est refusée : indique au moins une adresse e-mail pour chaque seuil.",
+        "doc_url": "https://docs.aws.amazon.com/cost-management/latest/userguide/create-cost-budget.html",
+        "doc_label": "Documentation AWS : créer un budget de coûts",
+        "search_query": "AWS Budgets créer un budget et une alerte e-mail"
+      }
+    },
+    {
+      "id": "instance",
+      "title": "Lancer le serveur EC2",
+      "where": "console",
+      "why": "EC2 est un serveur virtuel. C'est la machine qui fera tourner ton application. La paire de clés sert à t'y connecter : sans elle, tu ne pourras pas ouvrir de connexion SSH.",
+      "checklist": [
+        "Console EC2, puis Launch instance.",
+        "Name : [[app_slug]].",
+        "Application and OS Images : choisis Ubuntu, version Ubuntu Server 24.04 LTS.",
+        "Instance type : [[ec2_type]] ([[ec2_vcpu]] vCPU, [[ec2_ram_gb]] Gio de RAM).",
+        "Key pair (login) : Create new key pair, nom [[app_slug]]-cle, type ED25519, format .pem. Le fichier se télécharge : garde-le précieusement.",
+        "Network settings : Create security group, avec Allow SSH traffic from: My IP, puis Allow HTTPS traffic from the internet et Allow HTTP traffic from the internet. Vérifie que Auto-assign public IP est activé.",
+        "Configure storage : [[disk_gb]] GiB, type gp3.",
+        "Clique sur Launch instance."
+      ],
+      "commands": [],
+      "expect": "L'instance passe à l'état Running et affiche une adresse Public IPv4. Note-la : dans les étapes suivantes, elle s'appelle VOTRE_IP_SERVEUR.",
+      "warning": "L'adresse IP publique change si tu arrêtes puis redémarres l'instance (une Elastic IP la fixe, mais pense à la supprimer à la fin). Elle est facturée environ [[ipv4_cost]] $ par mois, déjà comprise dans l'estimation. Si ton adresse IP personnelle change, mets à jour la règle SSH du groupe de sécurité.",
+      "optional": false,
+      "help": {
+        "common_cause": "Ubuntu Server 24.04 LTS n'apparaît pas dans la liste rapide : cherche-le dans le catalogue d'images (AMI), ou choisis la version LTS la plus récente.",
+        "doc_url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/tutorial-launch-a-test-ec2-instance.html",
+        "doc_label": "Documentation AWS : lancer une instance EC2",
+        "search_query": "AWS EC2 lancer une instance Ubuntu tutoriel débutant"
+      }
+    },
+    {
+      "id": "connexion",
+      "title": "Te connecter au serveur",
+      "where": "local",
+      "why": "À partir de maintenant, tu pilotes le serveur depuis ton terminal, comme si tu étais devant lui.",
+      "checklist": [
+        "Remplace CHEMIN_VERS_LA_CLE.pem par le chemin du fichier téléchargé à l'étape précédente, et VOTRE_IP_SERVEUR par l'adresse de l'instance."
+      ],
+      "commands": [
+        {
+          "label": "macOS ou Linux : protéger le fichier de clé (SSH le refuse sinon)",
+          "language": "bash",
+          "os": "macos_linux",
+          "code": "chmod 400 CHEMIN_VERS_LA_CLE.pem"
+        },
+        {
+          "label": "Connexion SSH (utilisateur ubuntu pour cette image)",
+          "language": "bash",
+          "code": "ssh -i CHEMIN_VERS_LA_CLE.pem ubuntu@VOTRE_IP_SERVEUR"
+        }
+      ],
+      "expect": "Au premier essai, le terminal demande de confirmer l'empreinte du serveur : écris yes. Tu vois ensuite une invite qui commence par ubuntu@.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "UNPROTECTED PRIVATE KEY FILE : les droits du fichier .pem sont trop ouverts. Sur macOS ou Linux, lance chmod 400 ; sous Windows, retire l'accès des autres utilisateurs dans les propriétés du fichier. Si c'est un timeout, la règle SSH du groupe de sécurité ne correspond pas à ton adresse IP.",
+        "doc_url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EC2_GetStarted.html",
+        "doc_label": "Documentation AWS : se connecter à l'instance",
+        "search_query": "AWS EC2 ssh fichier pem connexion impossible"
+      }
+    },
+    {
+      "id": "docker",
+      "title": "Installer Docker sur le serveur",
+      "where": "server",
+      "why": "Docker fait tourner ton application dans un conteneur, de la même façon sur ton ordinateur et sur le serveur.",
+      "checklist": [
+        "Après la troisième commande, déconnecte-toi (exit) puis reconnecte-toi avec la commande SSH de l'étape précédente : ton utilisateur reçoit ainsi le groupe docker."
+      ],
+      "commands": [
+        {
+          "label": "Mettre le système à jour",
+          "language": "bash",
+          "code": "sudo apt update && sudo apt upgrade -y"
+        },
+        {
+          "label": "Installer Docker avec le script officiel",
+          "language": "bash",
+          "code": "curl -fsSL https://get.docker.com -o get-docker.sh\nsudo sh get-docker.sh"
+        },
+        {
+          "label": "Autoriser ton utilisateur à utiliser Docker",
+          "language": "bash",
+          "code": "sudo usermod -aG docker $USER"
+        },
+        {
+          "label": "Après t'être reconnecté, vérifier l'installation",
+          "language": "bash",
+          "code": "docker --version\ndocker compose version"
+        }
+      ],
+      "expect": "Les deux commandes de vérification affichent un numéro de version, sans avoir besoin de sudo.",
+      "warning": "Ce script est pratique pour démarrer. Pour un serveur critique, préfère l'installation par dépôt apt décrite dans la documentation de Docker.",
+      "optional": false,
+      "help": {
+        "common_cause": "permission denied en lançant docker : tu ne t'es pas reconnecté après la commande usermod. Fais exit, puis reconnecte-toi.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "installer Docker sur Ubuntu avec le script get.docker.com"
+      }
+    },
+    {
+      "id": "base",
+      "title": "Créer la base de données PostgreSQL (RDS)",
+      "where": "console",
+      "only_if": "database",
+      "why": "RDS est une base PostgreSQL gérée par AWS : installation, mises à jour et sauvegardes sont prises en charge pour toi.",
+      "checklist": [
+        "Console RDS, puis Create database, puis Standard create, moteur PostgreSQL.",
+        "Templates : Dev/Test, avec Single DB instance (une seule base, sans réplique).",
+        "DB instance identifier : [[app_slug]]-db. Master username : postgres. Choisis un mot de passe solide et note-le.",
+        "Instance configuration : [[rds_class]] ([[rds_vcpu]] vCPU, [[rds_ram_gb]] Gio de RAM), dans la catégorie Burstable classes.",
+        "Storage : [[rds_storage_gb]] GiB, type gp3.",
+        "Connectivity : choisis Connect to an EC2 compute resource et sélectionne ton instance. AWS prépare alors les règles réseau entre les deux. Public access : No.",
+        "Additional configuration : Initial database name = appdb (sans nom, RDS ne crée aucune base).",
+        "Garde les sauvegardes automatiques activées, puis clique sur Create database. L'opération prend plusieurs minutes."
+      ],
+      "commands": [],
+      "expect": "La base passe à l'état Available. Dans l'onglet Connectivity & security, note l'Endpoint : il s'appelle VOTRE_ENDPOINT_RDS dans la suite.",
+      "warning": "La base est facturée tant qu'elle existe, même sans visiteur. Ne la rends jamais publique.",
+      "optional": false,
+      "help": {
+        "common_cause": "L'application n'arrive pas à joindre la base (timeout) : le groupe de sécurité de la base doit autoriser le port 5432 depuis le groupe de sécurité de ton instance EC2. Vérifie la règle entrante dans le groupe de sécurité de la base.",
+        "doc_url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_GettingStarted.CreatingConnecting.PostgreSQL.html",
+        "doc_label": "Documentation AWS : créer une base PostgreSQL RDS",
+        "search_query": "AWS RDS PostgreSQL créer une base et connecter une instance EC2"
+      }
+    },
+    {
+      "id": "code",
+      "title": "Récupérer ton application sur le serveur",
+      "where": "server",
+      "why": "Ton code arrive sur le serveur depuis ton dépôt Git.",
+      "checklist": [],
+      "commands": [
+        {
+          "label": "Cloner le dépôt (remplace l'adresse par la tienne)",
+          "language": "bash",
+          "code": "git clone https://github.com/VOTRE_COMPTE/VOTRE_DEPOT.git\ncd VOTRE_DEPOT\nls"
+        }
+      ],
+      "expect": "La commande ls affiche les fichiers de ton projet, dont docker-compose.yml.",
+      "warning": "Si ton dépôt est privé, GitHub n'accepte pas ton mot de passe : utilise un jeton d'accès personnel ou une clé de déploiement (cherche la documentation de GitHub).",
+      "optional": false,
+      "help": {
+        "common_cause": "Repository not found : l'adresse est incorrecte, ou le dépôt est privé et le serveur n'a pas les droits.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "git clone dépôt privé GitHub jeton d'accès personnel"
+      }
+    },
+    {
+      "id": "secrets",
+      "title": "Configurer les mots de passe et les clés de ton application",
+      "where": "server",
+      "why": "Tes secrets restent dans un fichier .env sur le serveur : ils ne doivent jamais se retrouver dans ton dépôt Git.",
+      "checklist": [
+        "Remplace chaque valeur d'exemple par une vraie valeur.",
+        "Si ton projet a une base de données : DB_HOST = VOTRE_ENDPOINT_RDS, DB_PORT = 5432, DB_NAME = appdb, DB_USER = postgres, DB_PASSWORD = le mot de passe choisi à la création de la base (adapte les noms à ton application).",
+        "Enregistre avec Ctrl+O puis Entrée, et quitte avec Ctrl+X."
+      ],
+      "commands": [
+        {
+          "label": "Créer le fichier de configuration à partir de l'exemple",
+          "language": "bash",
+          "code": "cp .env.example .env"
+        },
+        {
+          "label": "Générer un mot de passe solide pour tes autres secrets",
+          "language": "bash",
+          "code": "openssl rand -base64 32"
+        },
+        {
+          "label": "Modifier le fichier",
+          "language": "bash",
+          "code": "nano .env"
+        }
+      ],
+      "expect": "Le fichier .env contient tes vraies valeurs, sans aucune valeur d'exemple.",
+      "warning": "Ne mets jamais le fichier .env dans ton dépôt Git : il doit figurer dans ton .gitignore. Pour rester simple, l'application utilise ici l'utilisateur administrateur de la base : un projet durable crée un utilisateur dédié.",
+      "optional": false,
+      "help": {
+        "common_cause": "cp : fichier introuvable. Ton projet n'a pas de .env.example : crée un fichier .env à la main avec les variables dont ton application a besoin.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "docker compose fichier .env variables d'environnement"
+      }
+    },
+    {
+      "id": "demarrage",
+      "title": "Démarrer l'application",
+      "where": "server",
+      "why": "Docker Compose construit et lance tous les services de ton application d'un seul coup.",
+      "checklist": [
+        "Dans ton docker-compose.yml, publie le port de ton application sur le port 80 (par exemple 80:8000 si elle écoute sur le port 8000)."
+      ],
+      "commands": [
+        {
+          "label": "Construire et démarrer en arrière-plan",
+          "language": "bash",
+          "code": "docker compose up -d --build"
+        },
+        {
+          "label": "Vérifier l'état des services",
+          "language": "bash",
+          "code": "docker compose ps"
+        },
+        {
+          "label": "Lire les derniers messages de l'application",
+          "language": "bash",
+          "code": "docker compose logs --tail 50"
+        }
+      ],
+      "expect": "Tous les services sont à l'état running (ou Up) et les messages ne montrent aucune erreur.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "L'application n'arrive pas à se connecter à la base : l'endpoint ou le mot de passe du fichier .env est incorrect, ou la règle réseau entre l'instance et la base manque.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "docker compose up erreur démarrage conteneur"
+      }
+    },
+    {
+      "id": "verification",
+      "title": "Vérifier que l'application répond",
+      "where": "local",
+      "why": "Il faut tester depuis l'extérieur, comme le ferait un utilisateur.",
+      "checklist": [
+        "Ouvre http://VOTRE_IP_SERVEUR dans ton navigateur.",
+        "Teste une action complète de ton application (connexion, création d'un élément)."
+      ],
+      "commands": [],
+      "expect": "Ton application s'affiche et les données sont bien enregistrées par la base.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "La page ne se charge pas : vérifie que le port 80 est ouvert dans le groupe de sécurité de l'instance, que le port est publié dans docker-compose.yml, et lis les messages de l'étape précédente.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "AWS EC2 groupe de sécurité ouvrir le port 80"
+      }
+    },
+    {
+      "id": "https",
+      "title": "Ajouter un nom de domaine et HTTPS",
+      "where": "server",
+      "why": "HTTPS chiffre les échanges. Il est indispensable si ton application gère des comptes ou des données personnelles. Caddy obtient et renouvelle le certificat tout seul.",
+      "checklist": [
+        "Chez ton registraire de domaine, crée un enregistrement DNS de type A qui pointe VOTRE_DOMAINE vers VOTRE_IP_SERVEUR (pense à une Elastic IP, sinon l'adresse change au redémarrage).",
+        "Dans docker-compose.yml, supprime la ligne qui publie ton application sur le port 80 et ajoute le service caddy ci-dessous.",
+        "Crée le fichier Caddyfile à côté de docker-compose.yml, avec le nom de ton service et son port à la place de NOM_DU_SERVICE et PORT."
+      ],
+      "commands": [
+        {
+          "label": "À ajouter dans la section services de docker-compose.yml",
+          "language": "yaml",
+          "code": "  caddy:\n    image: caddy:2\n    restart: unless-stopped\n    ports:\n      - \"80:80\"\n      - \"443:443\"\n    volumes:\n      - ./Caddyfile:/etc/caddy/Caddyfile\n      - caddy_data:/data\n      - caddy_config:/config"
+        },
+        {
+          "label": "À ajouter dans la section volumes de docker-compose.yml",
+          "language": "yaml",
+          "code": "volumes:\n  caddy_data:\n  caddy_config:"
+        },
+        {
+          "label": "Contenu du fichier Caddyfile",
+          "language": "text",
+          "code": "VOTRE_DOMAINE {\n    reverse_proxy NOM_DU_SERVICE:PORT\n}"
+        },
+        {
+          "label": "Redémarrer",
+          "language": "bash",
+          "code": "docker compose up -d"
+        }
+      ],
+      "expect": "https://VOTRE_DOMAINE affiche ton application avec un cadenas.",
+      "warning": "Si ton fichier docker-compose.yml a déjà une section volumes, ajoute seulement les deux lignes caddy_data et caddy_config dedans. Respecte l'indentation.",
+      "optional": true,
+      "help": {
+        "common_cause": "Le certificat n'est pas émis : l'enregistrement DNS n'est pas encore propagé (attends un peu et réessaie), ou les ports 80 et 443 sont fermés dans le groupe de sécurité.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "Caddy reverse proxy docker compose HTTPS automatique"
+      }
+    },
+    {
+      "id": "sauvegardes-base",
+      "title": "Vérifier les sauvegardes de la base",
+      "where": "console",
+      "only_if": "database",
+      "why": "Si tu fais une erreur ou si quelque chose casse, c'est ta façon de récupérer tes données.",
+      "checklist": [
+        "Console RDS, ta base, onglet Maintenance & backups : vérifie que les sauvegardes automatiques sont activées et note la durée de conservation.",
+        "RDS permet de restaurer la base à un instant précis dans cette période, vers une nouvelle base. Tu peux aussi créer un instantané manuel avant une opération risquée.",
+        "Le stockage des sauvegardes automatiques est gratuit jusqu'à la taille de la base ; au-delà, il est facturé."
+      ],
+      "commands": [],
+      "expect": "Les sauvegardes automatiques sont actives, avec une période de conservation affichée.",
+      "warning": "Une restauration crée une nouvelle base : il faut ensuite pointer ton application vers elle.",
+      "optional": false,
+      "help": {
+        "common_cause": "Les sauvegardes sont désactivées : la durée de conservation est à zéro. Modifie la base pour la régler à une valeur supérieure à zéro.",
+        "doc_url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_GettingStarted.CreatingConnecting.PostgreSQL.html",
+        "doc_label": "Documentation AWS : bases PostgreSQL RDS",
+        "search_query": "AWS RDS sauvegardes automatiques restaurer à un instant précis"
+      }
+    },
+    {
+      "id": "sauvegardes-disque",
+      "title": "Penser au disque du serveur",
+      "where": "console",
+      "why": "Le disque de ton instance n'est pas sauvegardé automatiquement. Si tu y stockes des données (fichiers envoyés, par exemple), une panne les fait perdre.",
+      "checklist": [
+        "Si ton application stocke des fichiers sur le disque, crée régulièrement un instantané : console EC2, Volumes, ton volume, Actions, Create snapshot.",
+        "Pour un stockage durable de fichiers, préfère Amazon S3 à un disque de serveur."
+      ],
+      "commands": [],
+      "expect": "Tu sais où vivent tes données et ce qui les protège.",
+      "warning": "Les instantanés sont facturés selon l'espace utilisé : supprime ceux dont tu n'as plus besoin.",
+      "optional": false,
+      "help": {
+        "common_cause": "Tu ne trouves pas le volume : il est dans la section Elastic Block Store, onglet Volumes, de la console EC2.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "AWS EC2 créer un instantané de volume EBS"
+      }
+    },
+    {
+      "id": "couts",
+      "title": "Surveiller tes coûts",
+      "where": "console",
+      "why": "Un serveur et une base coûtent tant qu'ils existent, même si personne ne visite ton application.",
+      "checklist": [
+        "Estimation de référence : [[monthly_total]] $ US par mois, hors taxes, région [[region]] (serveur et disque [[compute_cost]] $, base de données [[db_cost]] $, réseau [[network_cost]] $, fichiers [[files_cost]] $).",
+        "Le moteur suppose que les 100 premiers Go de trafic sortant par mois sont gratuits, partagés entre tous tes services AWS.",
+        "Dans la console : Billing and Cost Management, puis Bills, pour voir ce qui coûte.",
+        "Mets un rappel mensuel dans ton calendrier pour vérifier ta facture."
+      ],
+      "commands": [],
+      "expect": "Tu sais combien tu paies par mois et quand tu le vérifies.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Une facture plus élevée que prévu vient souvent de ressources oubliées (adresses IP, volumes, instantanés) ou du trafic sortant.",
+        "doc_url": "https://docs.aws.amazon.com/cost-management/latest/userguide/create-cost-budget.html",
+        "doc_label": "Documentation AWS : budgets de coûts",
+        "search_query": "AWS comprendre sa facture EC2 RDS"
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "id": "suppr-donnees",
+      "title": "Récupérer tes données (si tu veux les garder)",
+      "where": "server",
+      "only_if": "database",
+      "why": "Quand la base sera supprimée, tout ce qu'elle contient disparaîtra. Exporte ce que tu veux garder avant.",
+      "checklist": [
+        "Remplace VOTRE_ENDPOINT_RDS par l'endpoint de ta base. Le mot de passe te sera demandé.",
+        "Les deux premières commandes se lancent sur le serveur, la dernière sur ton ordinateur."
+      ],
+      "commands": [
+        {
+          "label": "Sur le serveur : installer l'outil client PostgreSQL",
+          "language": "bash",
+          "code": "sudo apt install -y postgresql-client"
+        },
+        {
+          "label": "Sur le serveur : exporter la base",
+          "language": "bash",
+          "code": "cd ~\npg_dump -h VOTRE_ENDPOINT_RDS -U postgres appdb > sauvegarde.sql"
+        },
+        {
+          "label": "Sur ton ordinateur : télécharger le fichier",
+          "language": "bash",
+          "code": "scp -i CHEMIN_VERS_LA_CLE.pem ubuntu@VOTRE_IP_SERVEUR:~/sauvegarde.sql ."
+        }
+      ],
+      "expect": "Un fichier sauvegarde.sql non vide est présent sur ton ordinateur.",
+      "warning": null,
+      "optional": true,
+      "help": {
+        "common_cause": "pg_dump refuse la connexion : le mot de passe est faux, ou le groupe de sécurité de la base n'autorise pas ton instance.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "pg_dump exporter une base RDS PostgreSQL depuis EC2"
+      }
+    },
+    {
+      "id": "suppr-base",
+      "title": "Supprimer la base de données",
+      "where": "console",
+      "only_if": "database",
+      "why": "Tant que la base existe, elle est facturée.",
+      "checklist": [
+        "Console RDS, Databases, ta base, puis Actions, Delete.",
+        "AWS propose de créer un instantané final et de conserver les sauvegardes automatiques. Si tu as exporté tes données, décoche ces deux options pour ne plus rien payer.",
+        "Confirme en tapant le texte demandé."
+      ],
+      "commands": [],
+      "expect": "La base passe à l'état Deleting, puis disparaît de la liste.",
+      "warning": "Définitif si tu ne gardes pas d'instantané : les données sont perdues.",
+      "optional": false,
+      "help": {
+        "common_cause": "La suppression est bloquée : la protection contre la suppression est activée. Modifie la base pour la désactiver.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "AWS RDS supprimer une base de données instantané final"
+      }
+    },
+    {
+      "id": "suppr-instance",
+      "title": "Résilier l'instance EC2",
+      "where": "console",
+      "why": "Tant que l'instance existe, elle est facturée.",
+      "checklist": [
+        "Console EC2, Instances, ton instance, puis Instance state, Terminate instance.",
+        "Si tu as créé une Elastic IP, libère-la : Elastic IPs, Release Elastic IP addresses.",
+        "Supprime ta paire de clés si tu n'en as plus besoin."
+      ],
+      "commands": [],
+      "expect": "L'instance passe à l'état Terminated.",
+      "warning": "Définitif : les données stockées sur le disque de l'instance sont perdues.",
+      "optional": false,
+      "help": {
+        "common_cause": "L'option Terminate est grisée : une protection contre la résiliation est activée. Désactive-la dans les paramètres de l'instance.",
+        "doc_url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EC2_GetStarted.html",
+        "doc_label": "Documentation AWS : nettoyer l'instance",
+        "search_query": "AWS EC2 terminate instance supprimer"
+      }
+    },
+    {
+      "id": "suppr-verif",
+      "title": "Vérifier qu'il ne reste rien de facturé",
+      "where": "console",
+      "why": "Certaines ressources existent séparément de l'instance et continuent d'être facturées.",
+      "checklist": [
+        "EC2 : Instances (Terminated), Volumes (supprime ceux qui restent), Snapshots, Elastic IPs.",
+        "RDS : Databases, Snapshots et Automated backups.",
+        "Billing and Cost Management, Bills : vérifie les jours suivants que la dépense n'augmente plus."
+      ],
+      "commands": [],
+      "expect": "Aucune ressource facturable ne reste dans ton compte.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Une dépense continue après la suppression : un volume, un instantané ou une adresse IP reste dans la région.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "AWS vérifier les ressources facturées après suppression"
+      }
+    }
+  ],
+  "limits": [
+    "Ce guide met l'application sur un seul serveur : une panne du serveur arrête l'application jusqu'à son remplacement.",
+    "La base est en Single-AZ, sans réplique : une panne de la zone coupe la base. La haute disponibilité n'est pas incluse dans l'estimation.",
+    "Le renforcement avancé de la sécurité (accès SSH restreint, mises à jour automatiques, détection d'intrusion) n'est pas couvert.",
+    "L'application utilise l'utilisateur administrateur de la base pour rester simple.",
+    "Il suppose une application qui démarre avec Docker Compose.",
+    "Les prix sont des références pour la région us-east-1 (octobre 2026) et changent d'une région à l'autre.",
+    "Les étapes de la console dépendent de l'interface d'AWS, qui peut évoluer."
+  ],
+  "sources": [
+    {"label": "AWS : lancer une instance EC2", "url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/tutorial-launch-a-test-ec2-instance.html"},
+    {"label": "AWS : premiers pas avec EC2", "url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EC2_GetStarted.html"},
+    {"label": "AWS : créer une base PostgreSQL RDS", "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_GettingStarted.CreatingConnecting.PostgreSQL.html"},
+    {"label": "AWS : créer un budget de coûts", "url": "https://docs.aws.amazon.com/cost-management/latest/userguide/create-cost-budget.html"}
+  ],
+  "written_from_docs_on": "2026-10-31",
+  "tested_on": null
+}
