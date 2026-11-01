@@ -1,0 +1,532 @@
+{
+  "arch_id": "gcp_cloud_run_sql",
+  "title": "Déployer ton application sur Google Cloud Run avec une base Cloud SQL",
+  "intro": "Ce guide te mène de zéro à ton application en ligne sur Cloud Run (HTTPS inclus), avec une base de données PostgreSQL gérée par Google. Suis les étapes dans l'ordre : chacune explique à quoi elle sert et comment vérifier qu'elle a fonctionné.",
+  "prerequisites": [
+    "Une application qui peut s'exécuter dans un conteneur : un fichier Dockerfile à la racine du projet, et un serveur qui écoute sur le port indiqué par la variable PORT (8080 par défaut).",
+    "Un terminal sur ton ordinateur (PowerShell sous Windows, Terminal sous macOS ou Linux).",
+    "Un compte Google et une carte bancaire pour activer la facturation.",
+    "Une application qui lit sa configuration dans des variables d'environnement, pas dans des fichiers du dépôt."
+  ],
+  "steps": [
+    {
+      "id": "projet",
+      "title": "Créer ton projet Google Cloud et activer la facturation",
+      "where": "console",
+      "why": "Le projet regroupe tout ce que tu crées (application, base, secrets) et sert de compteur pour la facturation.",
+      "checklist": [
+        "Va sur console.cloud.google.com et connecte-toi avec ton compte Google.",
+        "Crée un projet et note son identifiant (l'ID du projet, par exemple mon-projet-123456). Dans la suite, il s'appelle VOTRE_ID_PROJET.",
+        "Associe un compte de facturation au projet (menu Billing). Une carte bancaire est demandée."
+      ],
+      "commands": [],
+      "expect": "La console affiche ton projet, avec la facturation activée.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Les services refusent de se créer plus loin dans le guide : le projet n'a pas de compte de facturation associé. Vérifie dans la section Billing.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "créer un projet Google Cloud et activer la facturation"
+      }
+    },
+    {
+      "id": "budget",
+      "title": "Créer un budget et des alertes (avant toute ressource)",
+      "where": "console",
+      "why": "Cloud Run et Cloud SQL sont facturés à l'usage. Une alerte te prévient avant qu'une mauvaise surprise s'installe.",
+      "checklist": [
+        "Dans la console : Billing, puis Budgets & alerts, puis Create budget.",
+        "Portée : ton projet.",
+        "Montant : un peu au-dessus de l'estimation ([[monthly_total]] $ US par mois, hors taxes).",
+        "Seuils d'alerte : 50 %, 80 % et 100 %.",
+        "Ajoute ton adresse e-mail pour recevoir les notifications."
+      ],
+      "commands": [],
+      "expect": "Le budget apparaît dans la liste Budgets & alerts, rattaché à ton projet.",
+      "warning": "Un budget envoie des alertes mais ne bloque pas les dépenses : si tu reçois une alerte, agis tout de suite.",
+      "optional": false,
+      "help": {
+        "common_cause": "Tu ne trouves pas Budgets & alerts : ton compte n'a probablement pas le rôle d'administrateur de facturation sur ce compte de facturation.",
+        "doc_url": "https://cloud.google.com/billing/docs/how-to/budgets",
+        "doc_label": "Documentation Google : budgets et alertes",
+        "search_query": "Google Cloud créer un budget et des alertes de facturation"
+      }
+    },
+    {
+      "id": "gcloud",
+      "title": "Installer l'outil gcloud et te connecter",
+      "where": "local",
+      "why": "gcloud est l'outil en ligne de commande de Google Cloud : tu pilotes tout depuis ton terminal.",
+      "checklist": [
+        "Installe la Google Cloud CLI en suivant la documentation officielle pour ton système (Windows, macOS ou Linux), puis ouvre un nouveau terminal."
+      ],
+      "commands": [
+        {
+          "label": "Vérifier l'installation",
+          "language": "bash",
+          "code": "gcloud --version"
+        },
+        {
+          "label": "Te connecter et choisir ton projet (suis les questions affichées)",
+          "language": "bash",
+          "code": "gcloud init"
+        },
+        {
+          "label": "Sélectionner explicitement ton projet",
+          "language": "bash",
+          "code": "gcloud config set project VOTRE_ID_PROJET"
+        }
+      ],
+      "expect": "gcloud --version affiche des numéros de version, et gcloud init t'a connecté avec ton compte Google.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "La commande gcloud n'est pas reconnue : ferme puis rouvre le terminal après l'installation.",
+        "doc_url": "https://cloud.google.com/sdk/docs/install",
+        "doc_label": "Documentation Google : installer la CLI",
+        "search_query": "installer gcloud CLI Windows tutoriel"
+      }
+    },
+    {
+      "id": "api",
+      "title": "Activer les services Google nécessaires",
+      "where": "local",
+      "why": "Chaque service Google doit être activé dans ton projet avant d'être utilisé.",
+      "checklist": [],
+      "commands": [
+        {
+          "label": "Activer Cloud Run, la construction d'images, le stockage d'images, les secrets et Cloud SQL",
+          "language": "bash",
+          "code": "gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com sqladmin.googleapis.com"
+        }
+      ],
+      "expect": "La commande se termine sans erreur, après quelques dizaines de secondes.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "PERMISSION_DENIED ou erreur de facturation : le projet n'a pas de facturation active. Retourne à la première étape.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "gcloud services enable erreur permission facturation"
+      }
+    },
+    {
+      "id": "base",
+      "title": "Créer la base de données PostgreSQL (Cloud SQL)",
+      "where": "local",
+      "only_if": "database",
+      "why": "Cloud SQL est une base PostgreSQL gérée par Google : mises à jour, sauvegardes et surveillance sont prises en charge pour toi.",
+      "checklist": [
+        "La taille ([[db_vcpu]] vCPU, [[db_memory_gib]] Gio de RAM, [[db_storage_gb]] Go de stockage) vient de l'estimation de ton projet.",
+        "Remplace VOTRE_MOT_DE_PASSE_ADMIN et VOTRE_MOT_DE_PASSE_APPLICATION par deux mots de passe solides et différents. Garde le second : tu en auras besoin à l'étape suivante.",
+        "La création de l'instance prend plusieurs minutes : c'est normal."
+      ],
+      "commands": [
+        {
+          "label": "Créer l'instance (une seule ligne)",
+          "language": "bash",
+          "code": "gcloud sql instances create [[instance_name]] --database-version=POSTGRES_15 --edition=ENTERPRISE --cpu=[[db_vcpu]] --memory=[[db_memory_gib]]GiB --region=[[region]] --storage-size=[[db_storage_gb]]GB --storage-auto-increase --backup-start-time=03:00 --root-password=VOTRE_MOT_DE_PASSE_ADMIN"
+        },
+        {
+          "label": "Créer la base de ton application",
+          "language": "bash",
+          "code": "gcloud sql databases create appdb --instance=[[instance_name]]"
+        },
+        {
+          "label": "Créer l'utilisateur de ton application",
+          "language": "bash",
+          "code": "gcloud sql users create appuser --instance=[[instance_name]] --password=VOTRE_MOT_DE_PASSE_APPLICATION"
+        },
+        {
+          "label": "Vérifier l'état de l'instance",
+          "language": "bash",
+          "code": "gcloud sql instances list"
+        }
+      ],
+      "expect": "gcloud sql instances list affiche ton instance avec l'état RUNNABLE.",
+      "warning": "Les mots de passe écrits dans une commande restent dans l'historique de ton terminal : ne les réutilise pas ailleurs. L'instance est facturée tant qu'elle existe, même sans visiteur.",
+      "optional": false,
+      "help": {
+        "common_cause": "La commande refuse la combinaison de ressources demandée (mémoire ou édition incompatibles). Copie le message d'erreur exact et cherche-le.",
+        "doc_url": "https://cloud.google.com/sdk/gcloud/reference/sql/instances/create",
+        "doc_label": "Documentation Google : créer une instance Cloud SQL",
+        "search_query": "gcloud sql instances create postgres erreur"
+      }
+    },
+    {
+      "id": "secret",
+      "title": "Ranger le mot de passe de la base dans Secret Manager",
+      "where": "local",
+      "only_if": "database",
+      "why": "Le mot de passe est stocké chiffré chez Google et injecté dans l'application au démarrage : il n'apparaît ni dans ton code ni dans la configuration visible.",
+      "checklist": [
+        "Utilise exactement le même mot de passe que pour l'utilisateur appuser.",
+        "Remplace NUMERO_PROJET par le numéro affiché par la commande de la section Donner l'accès à l'application."
+      ],
+      "commands": [
+        {
+          "label": "Windows PowerShell : créer le secret",
+          "language": "powershell",
+          "os": "windows",
+          "code": "Set-Content -Path mdp.txt -Value 'VOTRE_MOT_DE_PASSE_APPLICATION' -NoNewline\ngcloud secrets create db-password --data-file=mdp.txt\nRemove-Item mdp.txt"
+        },
+        {
+          "label": "macOS ou Linux : créer le secret",
+          "language": "bash",
+          "os": "macos_linux",
+          "code": "printf '%s' 'VOTRE_MOT_DE_PASSE_APPLICATION' > mdp.txt\ngcloud secrets create db-password --data-file=mdp.txt\nrm mdp.txt"
+        },
+        {
+          "label": "Donner l'accès à l'application : trouver le numéro du projet",
+          "language": "bash",
+          "code": "gcloud projects describe VOTRE_ID_PROJET --format=\"value(projectNumber)\""
+        },
+        {
+          "label": "Autoriser le compte de service de Cloud Run à lire le secret",
+          "language": "bash",
+          "code": "gcloud secrets add-iam-policy-binding db-password --member=\"serviceAccount:NUMERO_PROJET-compute@developer.gserviceaccount.com\" --role=\"roles/secretmanager.secretAccessor\""
+        },
+        {
+          "label": "L'autoriser à se connecter à Cloud SQL",
+          "language": "bash",
+          "code": "gcloud projects add-iam-policy-binding VOTRE_ID_PROJET --member=\"serviceAccount:NUMERO_PROJET-compute@developer.gserviceaccount.com\" --role=\"roles/cloudsql.client\""
+        },
+        {
+          "label": "Vérifier que le secret existe",
+          "language": "bash",
+          "code": "gcloud secrets list"
+        }
+      ],
+      "expect": "gcloud secrets list affiche db-password, et les deux commandes d'autorisation se terminent sans erreur.",
+      "warning": "Le mot de passe doit être identique à celui de l'utilisateur de la base, sans espace ni retour à la ligne en trop. Pour rester simple, ce guide donne ces droits au compte de service par défaut : un projet durable utilise un compte de service dédié.",
+      "optional": false,
+      "help": {
+        "common_cause": "PERMISSION_DENIED au démarrage de l'application : les deux commandes d'autorisation n'ont pas été lancées, ou NUMERO_PROJET est incorrect.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "gcloud secrets create data-file Secret Manager tutoriel"
+      }
+    },
+    {
+      "id": "deploiement",
+      "title": "Déployer l'application sur Cloud Run",
+      "where": "local",
+      "only_if": "database",
+      "why": "Cloud Run construit une image de ton application à partir de ton code, la publie, et te donne une adresse HTTPS. Il la connecte à ta base et lui injecte le mot de passe.",
+      "checklist": [
+        "Place-toi dans le dossier de ton projet, celui qui contient ton Dockerfile.",
+        "Ton application doit écouter sur le port de la variable PORT et lire DB_HOST, DB_NAME, DB_USER et DB_PASSWORD (adapte les noms si ton code en utilise d'autres).",
+        "DB_HOST est un chemin de socket Unix : passe-le comme host à ta bibliothèque PostgreSQL.",
+        "Facturation choisie : [[billing_mode_text]].",
+        "--max-instances limite le nombre d'instances ([[max_instances]]) pour plafonner le coût en cas de pic ou d'abus.",
+        "gcloud peut proposer d'activer un service ou de créer un dépôt d'images : réponds y.",
+        "Le déploiement prend quelques minutes (construction de l'image comprise)."
+      ],
+      "commands": [
+        {
+          "label": "Déployer (une seule ligne, remplace VOTRE_ID_PROJET)",
+          "language": "bash",
+          "code": "gcloud run deploy [[service_name]] --source . --region [[region]] --cpu [[run_vcpu]] --memory [[run_memory]] --max-instances [[max_instances]] --allow-unauthenticated --add-cloudsql-instances VOTRE_ID_PROJET:[[region]]:[[instance_name]] --set-env-vars DB_HOST=/cloudsql/VOTRE_ID_PROJET:[[region]]:[[instance_name]],DB_NAME=appdb,DB_USER=appuser --set-secrets DB_PASSWORD=db-password:latest[[run_extra_flags]]"
+        }
+      ],
+      "expect": "La commande se termine par une ligne Service URL avec une adresse en https://...run.app.",
+      "warning": "--allow-unauthenticated rend ton application publique sur Internet : c'est voulu pour un site web, pas pour une API privée.",
+      "optional": false,
+      "help": {
+        "common_cause": "Erreur de permission pendant la construction : un rôle manque au compte de service utilisé pour construire l'image. Copie le message exact et cherche-le avec les mots « Cloud Run deploy from source permission ».",
+        "doc_url": "https://cloud.google.com/sdk/gcloud/reference/run/deploy",
+        "doc_label": "Documentation Google : gcloud run deploy",
+        "search_query": "gcloud run deploy source Dockerfile erreur"
+      }
+    },
+    {
+      "id": "deploiement-sans-base",
+      "title": "Déployer l'application sur Cloud Run",
+      "where": "local",
+      "only_if": "no_database",
+      "why": "Cloud Run construit une image de ton application à partir de ton code, la publie, et te donne une adresse HTTPS.",
+      "checklist": [
+        "Place-toi dans le dossier de ton projet, celui qui contient ton Dockerfile.",
+        "Ton application doit écouter sur le port de la variable PORT.",
+        "Facturation choisie : [[billing_mode_text]].",
+        "--max-instances limite le nombre d'instances ([[max_instances]]) pour plafonner le coût en cas de pic ou d'abus.",
+        "gcloud peut proposer d'activer un service ou de créer un dépôt d'images : réponds y."
+      ],
+      "commands": [
+        {
+          "label": "Déployer (une seule ligne)",
+          "language": "bash",
+          "code": "gcloud run deploy [[service_name]] --source . --region [[region]] --cpu [[run_vcpu]] --memory [[run_memory]] --max-instances [[max_instances]] --allow-unauthenticated[[run_extra_flags]]"
+        }
+      ],
+      "expect": "La commande se termine par une ligne Service URL avec une adresse en https://...run.app.",
+      "warning": "--allow-unauthenticated rend ton application publique sur Internet : c'est voulu pour un site web, pas pour une API privée.",
+      "optional": false,
+      "help": {
+        "common_cause": "Erreur de permission pendant la construction : un rôle manque au compte de service utilisé pour construire l'image. Copie le message exact et cherche-le avec les mots « Cloud Run deploy from source permission ».",
+        "doc_url": "https://cloud.google.com/sdk/gcloud/reference/run/deploy",
+        "doc_label": "Documentation Google : gcloud run deploy",
+        "search_query": "gcloud run deploy source Dockerfile erreur"
+      }
+    },
+    {
+      "id": "verification",
+      "title": "Vérifier que l'application répond",
+      "where": "local",
+      "why": "Il faut tester depuis l'extérieur, comme le ferait un utilisateur.",
+      "checklist": [
+        "Ouvre l'adresse affichée par la première commande dans ton navigateur.",
+        "Teste une action complète de ton application (connexion, création d'un élément).",
+        "Si tu as une base de données, elle est vide au départ : ton application doit créer ses tables elle-même (migrations)."
+      ],
+      "commands": [
+        {
+          "label": "Afficher l'adresse de ton application",
+          "language": "bash",
+          "code": "gcloud run services describe [[service_name]] --region [[region]] --format=\"value(status.url)\""
+        },
+        {
+          "label": "Lire les derniers messages de l'application",
+          "language": "bash",
+          "code": "gcloud run services logs read [[service_name]] --region [[region]] --limit 50"
+        }
+      ],
+      "expect": "Ton application s'affiche en HTTPS et les messages ne montrent aucune erreur.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Erreur 503 ou conteneur qui ne démarre pas : l'application n'écoute pas sur le port de la variable PORT, ou elle plante au démarrage. Lis les messages avec la commande de logs.",
+        "doc_url": "https://cloud.google.com/sdk/gcloud/reference/run/deploy",
+        "doc_label": "Documentation Google : gcloud run deploy",
+        "search_query": "Cloud Run container failed to start PORT"
+      }
+    },
+    {
+      "id": "domaine",
+      "title": "Ajouter ton propre nom de domaine",
+      "where": "console",
+      "why": "Ton adresse run.app fonctionne déjà en HTTPS. Un domaine à ton nom est facultatif, mais plus professionnel pour un client.",
+      "checklist": [
+        "Cloud Run permet d'associer un nom de domaine à ton service. Suis la documentation de Google ou un tutoriel vidéo (lien ci-dessous)."
+      ],
+      "commands": [],
+      "expect": "https://VOTRE_DOMAINE affiche ton application avec un cadenas.",
+      "warning": null,
+      "optional": true,
+      "help": {
+        "common_cause": "Le domaine n'est pas reconnu : l'enregistrement DNS n'est pas encore propagé. Attends un peu et réessaie.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "Cloud Run domaine personnalisé tutoriel"
+      }
+    },
+    {
+      "id": "sauvegardes",
+      "title": "Vérifier les sauvegardes de la base",
+      "where": "local",
+      "only_if": "database",
+      "why": "Si tu fais une erreur ou si quelque chose casse, c'est ta façon de récupérer tes données.",
+      "checklist": [
+        "Les sauvegardes automatiques quotidiennes ont lieu vers 03:00 UTC (réglées à la création de l'instance).",
+        "La première apparaît après le premier passage planifié : relance la commande plus tard si la liste est vide."
+      ],
+      "commands": [
+        {
+          "label": "Lister les sauvegardes",
+          "language": "bash",
+          "code": "gcloud sql backups list --instance=[[instance_name]]"
+        }
+      ],
+      "expect": "Au moins une sauvegarde apparaît dans la liste après le premier passage planifié.",
+      "warning": "Sans reprise à un instant précis (point-in-time recovery), tu peux perdre jusqu'à une journée de données. Cette option existe mais n'est pas incluse dans l'estimation.",
+      "optional": false,
+      "help": {
+        "common_cause": "La liste est vide : la première sauvegarde n'a pas encore eu lieu. Attends le lendemain de la création de l'instance.",
+        "doc_url": "https://cloud.google.com/sdk/gcloud/reference/sql/instances/create",
+        "doc_label": "Documentation Google : créer une instance Cloud SQL",
+        "search_query": "Cloud SQL sauvegardes automatiques restaurer"
+      }
+    },
+    {
+      "id": "retour-arriere",
+      "title": "Revenir à la version précédente si une mise à jour pose problème",
+      "where": "local",
+      "why": "Cloud Run garde les versions déployées (appelées révisions). Tu peux rediriger le trafic vers la précédente en quelques secondes.",
+      "checklist": [
+        "Liste d'abord les révisions, puis choisis le nom de celle qui fonctionnait (remplace NOM_DE_LA_REVISION)."
+      ],
+      "commands": [
+        {
+          "label": "Lister les révisions",
+          "language": "bash",
+          "code": "gcloud run revisions list --service [[service_name]] --region [[region]]"
+        },
+        {
+          "label": "Rediriger tout le trafic vers une révision",
+          "language": "bash",
+          "code": "gcloud run services update-traffic [[service_name]] --region [[region]] --to-revisions NOM_DE_LA_REVISION=100"
+        }
+      ],
+      "expect": "Recharge ton application : elle se comporte comme avant la mise à jour.",
+      "warning": "Le retour arrière ne concerne que le code. Il ne défait pas les changements faits dans la base de données.",
+      "optional": true,
+      "help": {
+        "common_cause": "Le nom de révision est refusé : copie-le exactement depuis la colonne de la liste des révisions.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "Cloud Run revenir à une révision précédente rollback"
+      }
+    },
+    {
+      "id": "couts",
+      "title": "Surveiller tes coûts",
+      "where": "console",
+      "why": "Une base de données coûte tant qu'elle existe, même si personne ne visite ton application. Il vaut mieux savoir à quoi s'attendre.",
+      "checklist": [
+        "Estimation de référence : [[monthly_total]] $ US par mois, hors taxes, pour la région [[region]] (Cloud Run [[run_cost]] $, base de données [[sql_cost]] $, trafic sortant [[egress_cost]] $).",
+        "Cloud Run a des quotas gratuits mensuels, appliqués une seule fois par compte de facturation : si d'autres projets les consomment déjà, ta facture sera plus élevée.",
+        "Dans la console : Billing, puis Reports, pour voir ce qui coûte.",
+        "Mets un rappel mensuel dans ton calendrier pour vérifier ta facture."
+      ],
+      "commands": [],
+      "expect": "Tu sais combien tu paies par mois et quand tu le vérifies.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Une facture plus élevée que prévu vient souvent de la base de données, d'instances laissées en CPU toujours alloué, ou du trafic sortant.",
+        "doc_url": "https://cloud.google.com/billing/docs/how-to/budgets",
+        "doc_label": "Documentation Google : budgets et alertes",
+        "search_query": "Google Cloud comprendre sa facture Cloud Run Cloud SQL"
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "id": "suppr-donnees",
+      "title": "Exporter tes données avant de tout supprimer",
+      "where": "console",
+      "only_if": "database",
+      "why": "Quand le projet ou la base sera supprimé, les données disparaîtront. Exporte ce que tu veux garder avant.",
+      "checklist": [
+        "Dans la console : Cloud SQL, ton instance, puis Export.",
+        "L'export demande un espace Cloud Storage : suis les instructions de la console. Cet espace est facturé au stockage."
+      ],
+      "commands": [],
+      "expect": "Un fichier d'export est présent dans ton espace Cloud Storage.",
+      "warning": null,
+      "optional": true,
+      "help": {
+        "common_cause": "L'export est refusé : le compte de service de l'instance n'a pas le droit d'écrire dans l'espace choisi. Suis les indications de la console.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "Cloud SQL exporter base PostgreSQL console"
+      }
+    },
+    {
+      "id": "suppr-projet",
+      "title": "Supprimer le projet (le plus simple)",
+      "where": "local",
+      "why": "Supprimer le projet supprime tout ce qu'il contient : service, base, secrets et images. C'est la façon la plus sûre de ne plus rien payer, si le projet ne servait qu'à cette application.",
+      "checklist": [
+        "Vérifie d'abord que tu es dans le bon projet avec la première commande."
+      ],
+      "commands": [
+        {
+          "label": "Afficher le projet actif",
+          "language": "bash",
+          "code": "gcloud config get-value project"
+        },
+        {
+          "label": "Supprimer le projet",
+          "language": "bash",
+          "code": "gcloud projects delete VOTRE_ID_PROJET"
+        }
+      ],
+      "expect": "gcloud demande confirmation, puis indique que le projet est supprimé.",
+      "warning": "Définitif pour tout ce que contient le projet. Ne le fais pas si le projet sert à autre chose.",
+      "optional": false,
+      "help": {
+        "common_cause": "Permission refusée : seul un propriétaire du projet peut le supprimer.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "gcloud projects delete supprimer projet Google Cloud"
+      }
+    },
+    {
+      "id": "suppr-ressources",
+      "title": "Ou supprimer seulement les ressources de l'application",
+      "where": "local",
+      "why": "À utiliser si tu veux garder le projet pour autre chose.",
+      "checklist": [
+        "Ignore la commande Cloud SQL si tu n'avais pas de base de données."
+      ],
+      "commands": [
+        {
+          "label": "Supprimer le service Cloud Run",
+          "language": "bash",
+          "code": "gcloud run services delete [[service_name]] --region [[region]]"
+        },
+        {
+          "label": "Supprimer l'instance Cloud SQL (si tu as une base)",
+          "language": "bash",
+          "code": "gcloud sql instances delete [[instance_name]]"
+        },
+        {
+          "label": "Supprimer le secret",
+          "language": "bash",
+          "code": "gcloud secrets delete db-password"
+        }
+      ],
+      "expect": "Chaque commande demande une confirmation, puis indique que la ressource est supprimée.",
+      "warning": "La suppression de l'instance Cloud SQL est définitive : exporte tes données avant.",
+      "optional": true,
+      "help": {
+        "common_cause": "L'instance ne peut pas être supprimée : une protection contre la suppression est activée. Désactive-la dans les paramètres de l'instance.",
+        "doc_url": null,
+        "doc_label": null,
+        "search_query": "gcloud sql instances delete protection suppression"
+      }
+    },
+    {
+      "id": "suppr-verif",
+      "title": "Vérifier qu'il ne reste rien de facturé",
+      "where": "console",
+      "why": "Certaines ressources créées pendant le déploiement existent séparément de ton service et continuent d'être facturées.",
+      "checklist": [
+        "Cloud Run : aucun service.",
+        "Cloud SQL : aucune instance.",
+        "Artifact Registry : si tu gardes le projet, supprime le dépôt d'images créé par le déploiement.",
+        "Cloud Storage : supprime les espaces de stockage créés pour tes exports ou par la construction.",
+        "Billing, puis Reports : vérifie que la dépense du mois n'augmente plus."
+      ],
+      "commands": [],
+      "expect": "Aucune ressource facturable ne reste dans ton projet.",
+      "warning": null,
+      "optional": false,
+      "help": {
+        "common_cause": "Une dépense continue après la suppression : des images ou des espaces de stockage restent dans le projet.",
+        "doc_url": "https://cloud.google.com/billing/docs/how-to/budgets",
+        "doc_label": "Documentation Google : budgets et alertes",
+        "search_query": "Google Cloud vérifier ressources facturées Artifact Registry Cloud Storage"
+      }
+    }
+  ],
+  "limits": [
+    "Ce guide configure une seule région, us-central1 (la région de référence des prix) : les prix d'une autre région peuvent différer.",
+    "La base n'a pas de haute disponibilité : une panne de zone coupe la base, donc l'application.",
+    "Sans reprise à un instant précis, la perte de données peut atteindre une journée.",
+    "Il suppose une application qui s'exécute dans un conteneur et écoute le port de la variable PORT.",
+    "Les droits sont donnés au compte de service par défaut pour rester simple : une mise en production durable utilise un compte de service dédié.",
+    "Les quotas gratuits de Cloud Run sont partagés par compte de facturation.",
+    "Les étapes dépendent des outils et de l'interface de Google, qui peuvent évoluer."
+  ],
+  "sources": [
+    {"label": "Google : gcloud run deploy", "url": "https://cloud.google.com/sdk/gcloud/reference/run/deploy"},
+    {"label": "Google : gcloud sql instances create", "url": "https://cloud.google.com/sdk/gcloud/reference/sql/instances/create"},
+    {"label": "Google : budgets et alertes", "url": "https://cloud.google.com/billing/docs/how-to/budgets"},
+    {"label": "Google : installer la CLI", "url": "https://cloud.google.com/sdk/docs/install"}
+  ],
+  "written_from_docs_on": "2026-10-31",
+  "tested_on": null
+}

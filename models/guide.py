@@ -28,7 +28,9 @@ class GuideStep(BaseModel):
     expect: str = Field(min_length=1)
     warning: str | None = None
     optional: bool = False
+    only_if: Literal["database", "no_database"] | None = None
     help: StepHelp
+
 
 
 class GuideSource(BaseModel):

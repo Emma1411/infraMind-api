@@ -4,7 +4,7 @@ from services.engine.architectures import get_architectures
 from services.engine.catalog import Catalog, get_catalog
 from services.engine.evaluate import evaluate
 from services.guides.loader import get_guides
-from services.guides.registry import PARAM_BUILDERS
+from services.guides.registry import GUIDE_PROVIDERS
 from services.guides.render import render_guide, youtube_search_url
 
 
@@ -34,6 +34,7 @@ def build_guide(arch_id: str, spec: ProjectSpec, catalog: Catalog | None = None)
 
     result = evaluate(spec, catalog=catalog, with_sensitivity=False)
     architecture = next(r for r in result.ranking if r.id == arch_id)
-    builder, _ = PARAM_BUILDERS[arch_id]
-    params = builder(architecture, spec, catalog)
-    return GuideResponse(arch_id=arch_id, available=True, guide=render_guide(guide, params))
+    provider = GUIDE_PROVIDERS[arch_id]
+    params = provider.build_params(architecture, spec, catalog)
+    flags = provider.build_flags(spec)
+    return GuideResponse(arch_id=arch_id, available=True, guide=render_guide(guide, params, flags))

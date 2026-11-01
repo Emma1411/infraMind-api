@@ -139,10 +139,10 @@ def test_guide_endpoint_returns_a_rendered_guide():
 
 
 def test_guide_endpoint_fallback_for_missing_guide():
-    response = client.post("/api/guides/gcp_cloud_run_sql", json={"spec": {}})
+    response = client.post("/api/guides/azure_vm_postgres", json={"spec": {}})
     assert response.status_code == 200
     assert response.json()["available"] is False
 
-
 def test_guide_endpoint_unknown_architecture_is_404():
     assert client.post("/api/guides/inexistante", json={"spec": {}}).status_code == 404
+
