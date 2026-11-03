@@ -40,3 +40,15 @@ def test_invalid_value_is_rejected():
 def test_unknown_question_is_rejected():
     with pytest.raises(AnswerError):
         apply_answers(ProjectSpec(), {"inconnu.champ": "x"})
+
+def test_switching_to_unknown_clears_the_previous_value():
+    spec = apply_answers(ProjectSpec(), {"traffic.daily_users": "under_100"})
+    spec = apply_answers(spec, {"traffic.daily_users": "unknown"})
+    assert spec.traffic.daily_users is None
+    assert "traffic.daily_users" in spec.unknown
+
+
+def test_unknown_on_a_list_field_clears_it():
+    spec = apply_answers(ProjectSpec(), {"delivery.environments": ["dev", "prod"]})
+    spec = apply_answers(spec, {"delivery.environments": "unknown"})
+    assert spec.delivery.environments == []

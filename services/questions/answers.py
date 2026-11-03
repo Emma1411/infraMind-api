@@ -20,6 +20,8 @@ def apply_answers(spec: ProjectSpec, answers: dict[str, Any]) -> ProjectSpec:
         domain, field = path.split(".", 1)
 
         if isinstance(value, str) and value == UNKNOWN:
+            # « Je ne sais pas » efface une ancienne valeur : sinon le champ resterait compté comme connu
+            data[domain][field] = [] if isinstance(data[domain][field], list) else None
             unknown.add(path)
             continue
 
