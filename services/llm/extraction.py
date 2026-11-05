@@ -36,7 +36,7 @@ async def extract_spec(text: str, client: Any = None) -> ProjectSpec:
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0,
-            max_tokens=1500,
+            max_tokens=20000,
         )
         content = response.choices[0].message.content or ""
         try:

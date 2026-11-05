@@ -9,11 +9,13 @@ from models.question import Question
 from services.llm.client import LLMNotConfigured
 from services.llm.extraction import ExtractionError, extract_spec
 from services.questions.answers import AnswerError, apply_answers
-from services.questions.builder import build_questions
 from services.questions.coverage import compute_coverage
 from utils.sanitize import mask_secrets
 from models.evaluation import EvaluationResult
 from services.engine.evaluate import evaluate
+from models.question import QuestionState
+from services.questions.builder import build_question_states, build_questions
+
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +73,12 @@ async def extract(payload: ExtractRequest) -> ExtractResponse:
         spec = await extract_spec(clean_text)
     except LLMNotConfigured:
         raise HTTPException(status_code=503, detail="Le service d'IA n'est pas configuré.")
-    except ExtractionError:
+    except ExtractionError as exc:
+        logger.exception("ÉCHEC EXTRACTION IA : %s", exc)
+
         raise HTTPException(
             status_code=422,
-            detail="L'IA n'a pas pu structurer ce texte. Précise ton projet et réessaie.",
+            detail=f"Erreur d'extraction : {str(exc)}",
         )
     except OpenAIError:
         logger.exception("Erreur lors de l'appel au service d'IA")
@@ -120,3 +124,16 @@ class EvaluateRequest(BaseModel):
 @router.post("/evaluate", response_model=EvaluationResult)
 def evaluate_spec(payload: EvaluateRequest) -> EvaluationResult:
     return evaluate(payload.spec)
+
+class QuestionStatesResponse(BaseModel):
+    questions: list[QuestionState]
+    domain_status: dict[str, str]
+
+
+@router.post("/question-states", response_model=QuestionStatesResponse)
+def question_states(payload: QuestionsRequest) -> QuestionStatesResponse:
+    report = compute_coverage(payload.spec)
+    return QuestionStatesResponse(
+        questions=build_question_states(payload.spec),
+        domain_status=report.domain_status(),
+    )
